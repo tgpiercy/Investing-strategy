@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.12 + Cascading Selection Matrix)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.13 + Full Macro View)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -286,9 +286,6 @@ def run_tactical_chart(ticker):
         dp_mask = (df['Vol_Ratio'] >= 1.5) & (df['Range_Comp'] <= 0.75)
         dp_signals = df[dp_mask]
 
-        end_date = df.index[-1]
-        start_date = end_date - pd.Timedelta(days=90)
-
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
 
         fig.add_trace(go.Candlestick(
@@ -322,8 +319,9 @@ def run_tactical_chart(ticker):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         
+        # X-Axis range restriction fully removed for macro 1-year view
         fig.update_yaxes(gridcolor='#30363d', zeroline=False)
-        fig.update_xaxes(gridcolor='#30363d', zeroline=False, range=[start_date, end_date])
+        fig.update_xaxes(gridcolor='#30363d', zeroline=False)
 
         latest_data = {
             "Close": df['Close'].iloc[-1], "SMA_50": df['SMA_50'].iloc[-1],

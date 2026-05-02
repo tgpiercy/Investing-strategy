@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.11 + Execution Decoder)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.12 + Cascading Selection Matrix)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -325,7 +325,6 @@ def run_tactical_chart(ticker):
         fig.update_yaxes(gridcolor='#30363d', zeroline=False)
         fig.update_xaxes(gridcolor='#30363d', zeroline=False, range=[start_date, end_date])
 
-        # Pack the final row's data for the Decoder module
         latest_data = {
             "Close": df['Close'].iloc[-1], "SMA_50": df['SMA_50'].iloc[-1],
             "EMA_9": df['EMA_9'].iloc[-1], "EMA_21": df['EMA_21'].iloc[-1],
@@ -492,8 +491,23 @@ st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RE
 recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
 
 with recon_col1:
-    chart_tickers = cfg.LIEUTENANTS + ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]
-    target_chart = st.selectbox("Select Target:", list(dict.fromkeys(chart_tickers)))
+    st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Target Acquisition Matrix</p>", unsafe_allow_html=True)
+    
+    # --- The Cascading Selection Matrix ---
+    target_category = st.selectbox("Category Lens:", ["Lieutenants (Watchlist)", "Indices", "Sectors (Macro)", "Subsectors (Micro)", "Thematic (AI/Crypto)"])
+    
+    if target_category == "Indices":
+        active_list = ["SPY", "QQQ", "IWM", "DIA", "EFA", "EEM"]
+    elif target_category == "Sectors (Macro)":
+        active_list = ["XLK", "XLF", "XLV", "XLE", "XLY", "XLI", "XLP", "XLU", "XLB", "XLRE"]
+    elif target_category == "Subsectors (Micro)":
+        active_list = ["XSD", "KRE", "ITB", "XOP", "XRT", "XBI", "JETS", "OIH"]
+    elif target_category == "Thematic (AI/Crypto)":
+        active_list = ["NVDA", "AMD", "SMCI", "ANET", "VRT", "PLTR", "TSM", "MSTR", "COIN", "MARA"]
+    else:
+        active_list = list(dict.fromkeys(cfg.LIEUTENANTS))
+        
+    target_chart = st.selectbox("Select Target:", active_list)
     
     st.markdown("""
     <div style='background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 15px; margin-top: 20px;'>
@@ -556,4 +570,3 @@ if last_data:
     journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | TREND: {'BULL' if trend_bull else 'BEAR'} | MOMENTUM: {'IGNITED' if mom_bull else 'LAGGING'} | LIQ: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} || RISK -> STRUC: {abs(struct_pct):.2f}%, TACT: {tact_pct:.2f}%"
     st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
     st.code(journal_str, language="text")
-

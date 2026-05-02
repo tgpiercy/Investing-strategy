@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.13 + Full Macro View)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.14 + Full Smart Money Expansion)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -37,14 +37,12 @@ st.markdown("""
     .defcon-title { font-size: 1.8rem; font-weight: 900; letter-spacing: 2px; margin-bottom: 5px; }
     .defcon-sub { font-size: 1rem; font-family: 'Roboto Mono', monospace; font-weight: 700; }
     
-    /* Tactical Cards - FLEXBOX INJECTED */
+    /* Tactical Cards */
     .tactical-card { 
         background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; 
         margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: all 0.2s ease;
         display: flex; flex-direction: column; justify-content: space-between; min-height: 170px;
     }
-    
-    /* Dynamic State Borders */
     .card-bullish { border-left: 5px solid #39FF14; background: linear-gradient(90deg, rgba(57,255,20,0.05) 0%, rgba(22,27,34,1) 40%); }
     .card-bearish { border-left: 5px solid #FF4444; background: linear-gradient(90deg, rgba(255,68,68,0.05) 0%, rgba(22,27,34,1) 40%); }
     .card-neutral { border-left: 5px solid #8b949e; }
@@ -132,16 +130,70 @@ def get_gamma_walls():
             p_wall = chain.puts.loc[chain.puts['openInterest'].idxmax()]
             
             results.append({
-                "Ticker": ticker, 
-                "Price": px, 
-                "Call Wall": c_wall['strike'], 
+                "Ticker": ticker, "Price": px, "Call Wall": c_wall['strike'], 
                 "Dist to Call": ((c_wall['strike'] - px) / px) * 100, 
-                "Put Wall": p_wall['strike'], 
-                "Dist to Put": ((px - p_wall['strike']) / px) * 100
+                "Put Wall": p_wall['strike'], "Dist to Put": ((px - p_wall['strike']) / px) * 100
             })
         except: 
             pass
     return results
+
+@st.cache_data(ttl=3600)
+def run_credit_stress_engine():
+    try:
+        df = yf.download(["HYG", "IEF", "SPY"], period="6mo", progress=False)['Close']
+        df = df.dropna()
+        df['Credit_Ratio'] = df['HYG'] / df['IEF']
+        df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
+        
+        spy_bullish = df['SPY'].iloc[-1] > df['SPY'].rolling(20).mean().iloc[-1]
+        credit_bearish = df['Credit_Ratio'].iloc[-1] < df['Ratio_20SMA'].iloc[-1]
+        divergence = spy_bullish and credit_bearish
+        
+        return {"status": "online", "divergence": divergence, "ratio": df['Credit_Ratio'].iloc[-1], "sma": df['Ratio_20SMA'].iloc[-1]}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
+
+@st.cache_data(ttl=900)
+def get_options_skew(ticker="SPY"):
+    try:
+        tk = yf.Ticker(ticker)
+        px = tk.history(period="1d")['Close'].iloc[-1]
+        exps = tk.options
+        if not exps: return {"status": "offline"}
+        
+        chain = tk.option_chain(exps[min(1, len(exps)-1)]) # Target near-term
+        calls, puts = chain.calls, chain.puts
+        
+        pcr = puts['openInterest'].sum() / calls['openInterest'].sum() if calls['openInterest'].sum() > 0 else 1
+        
+        c_strike = calls.iloc[(calls['strike'] - (px * 1.05)).abs().argsort()[:1]]
+        p_strike = puts.iloc[(puts['strike'] - (px * 0.95)).abs().argsort()[:1]]
+        
+        c_iv = c_strike['impliedVolatility'].values[0] if not c_strike.empty else 0
+        p_iv = p_strike['impliedVolatility'].values[0] if not p_strike.empty else 0
+        skew = (p_iv - c_iv) * 100 # Convert to percentage points
+        
+        return {"status": "online", "pcr": pcr, "put_iv": p_iv, "call_iv": c_iv, "skew": skew}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
+
+@st.cache_data(ttl=86400)
+def get_insider_signals():
+    results = []
+    # Hardcoded short list to prevent API timeout on free tier
+    scan_list = ["NVDA", "AMD", "PLTR", "SMCI", "TSLA", "COIN", "MSTR", "XOM"]
+    for ticker in scan_list:
+        try:
+            tk = yf.Ticker(ticker)
+            it = tk.insider_transactions
+            if it is not None and not it.empty:
+                buys = it[it.iloc[:, 0].astype(str).str.contains("Buy|Purchase", case=False, na=False)]
+                if not buys.empty:
+                    results.append({"Ticker": ticker, "Status": "Recent Accumulation Detected"})
+        except: pass
+    if not results: results.append({"Ticker": "SYSTEM", "Status": "No anomalous C-Suite blocks detected today."})
+    return pd.DataFrame(results)
 
 @st.cache_data(ttl=900)
 def run_kinetic_radar():
@@ -163,8 +215,7 @@ def run_kinetic_radar():
             
             if dist >= cfg.MIN_DONCHIAN_PROX and v_spike >= cfg.MIN_VOLUME_SPIKE: 
                 results.append({"Ticker": ticker, "Dist to High (%)": dist, "Vol Spike (x)": v_spike, "Price": close})
-        except: 
-            pass
+        except: pass
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=900)
@@ -189,14 +240,8 @@ def run_dark_pool_radar():
             range_compression = current_range / atr_20 if atr_20 > 0 else 1
             
             if v_spike >= 1.5 and range_compression <= 0.75: 
-                results.append({
-                    "Ticker": ticker, 
-                    "Vol Spike (x)": v_spike, 
-                    "Price Compression": range_compression, 
-                    "Price": close
-                })
-        except: 
-            pass
+                results.append({"Ticker": ticker, "Vol Spike (x)": v_spike, "Price Compression": range_compression, "Price": close})
+        except: pass
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
@@ -211,11 +256,8 @@ def run_rotation_engine():
         current_sma = df['Ratio_50SMA'].iloc[-1]
         is_equity_favored = current_ratio > current_sma
         
-        chart_data = df[['Ratio', 'Ratio_50SMA']].tail(90)
-        
-        return {"status": "online", "equity_favored": is_equity_favored, "ratio": current_ratio, "sma": current_sma, "chart": chart_data}
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
+        return {"status": "online", "equity_favored": is_equity_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
+    except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def run_rrg_engine(universe="Macro"):
@@ -260,8 +302,7 @@ def run_rrg_engine(universe="Macro"):
                     "Bubble_Size": dynamic_size, "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
                 })
         return {"status": "online", "data": results, "benchmark": benchmark}
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
+    except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=300)
 def run_tactical_chart(ticker):
@@ -319,7 +360,6 @@ def run_tactical_chart(ticker):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         
-        # X-Axis range restriction fully removed for macro 1-year view
         fig.update_yaxes(gridcolor='#30363d', zeroline=False)
         fig.update_xaxes(gridcolor='#30363d', zeroline=False)
 
@@ -327,8 +367,7 @@ def run_tactical_chart(ticker):
             "Close": df['Close'].iloc[-1], "SMA_50": df['SMA_50'].iloc[-1],
             "EMA_9": df['EMA_9'].iloc[-1], "EMA_21": df['EMA_21'].iloc[-1],
             "Vol_SMA_9": df['Vol_SMA_9'].iloc[-1], "Vol_SMA_50": df['Vol_SMA_50'].iloc[-1],
-            "Vol_Ratio": df['Vol_Ratio'].iloc[-1], "Range_Comp": df['Range_Comp'].iloc[-1],
-            "ATR_20": df['ATR_20'].iloc[-1]
+            "Vol_Ratio": df['Vol_Ratio'].iloc[-1], "Range_Comp": df['Range_Comp'].iloc[-1], "ATR_20": df['ATR_20'].iloc[-1]
         }
         return fig, latest_data
     except Exception as e:
@@ -351,7 +390,7 @@ with st.spinner("Calibrating Volatility Engines..."):
         st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M Ratio: {r:.2f})</span></div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 1 (MACRO & MICRO)
+# UI RENDERING: ROW 1 (MACRO TIDE & GAMMA WALLS)
 # ==============================================================================
 col1, col2 = st.columns([1, 1], gap="large")
 
@@ -415,11 +454,61 @@ with col2:
             """, unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 2 (THE RADARS)
+# UI RENDERING: ROW 2 (CREDIT STRESS & VOLATILITY SKEW)
 # ==============================================================================
-col3, col4 = st.columns([1, 1], gap="large")
+st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY (SMART MONEY)</div>", unsafe_allow_html=True)
+c_col1, c_col2 = st.columns([1, 1], gap="large")
 
-with col3:
+with c_col1:
+    with st.spinner("Analyzing High Yield vs Treasury Spreads (HYG/IEF)..."):
+        credit = run_credit_stress_engine()
+        if credit['status'] == 'online':
+            if credit['divergence']:
+                c_card, c_text, c_mandate = "card-bearish", "#FF4444", "MANDATE: RISK-OFF DIVERGENCE DETECTED (CREDIT CONTRACTING)"
+            else:
+                c_card, c_text, c_mandate = "card-bullish", "#39FF14", "MANDATE: CREDIT MARKETS ALIGNED WITH EQUITIES (RISK-ON)"
+                
+            st.markdown(f"""
+            <div class='tactical-card {c_card}'>
+                <div>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'><div class='asset-title'>CREDIT STRESS RADAR</div></div>
+                    <div class='metric-sub' style='margin-top: 10px;'>
+                        <div class='data-row'><span>HYG / IEF RATIO:</span><span style='color: #FFF; font-weight: bold;'>{credit['ratio']:.3f}</span></div>
+                        <div class='data-row'><span>20-DAY TREND:</span><span style='color: {c_text}; font-weight: bold;'>{'DIVERGING FROM SPY' if credit['divergence'] else 'SUPPORTIVE'}</span></div>
+                        <p style='margin-top:10px; font-size:0.8rem;'>*If Equities rise while Junk Bonds fall relative to Treasuries, Smart Money is fleeing to safety.</p>
+                    </div>
+                </div>
+                <div class='mandate-box {'mandate-sell' if credit['divergence'] else 'mandate-buy'}'>[ {c_mandate} ]</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+with c_col2:
+    with st.spinner("Parsing SPY Options Flow & Skew..."):
+        skew = get_options_skew()
+        if skew['status'] == 'online':
+            is_fear = skew['skew'] > 5.0 or skew['pcr'] > 1.5
+            s_card, s_text, s_mandate = ("card-bearish", "#FF4444", "MANDATE: INSTITUTIONS OVERPAYING FOR PUTS (HEDGING)") if is_fear else ("card-bullish", "#39FF14", "MANDATE: VOLATILITY SKEW NORMAL (NO EXCESS FEAR)")
+            
+            st.markdown(f"""
+            <div class='tactical-card {s_card}'>
+                <div>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'><div class='asset-title'>OPTIONS FLOW (SPY)</div></div>
+                    <div class='metric-sub' style='margin-top: 10px;'>
+                        <div class='data-row'><span>PUT/CALL RATIO (OI):</span><span style='color: #FFF; font-weight: bold;'>{skew['pcr']:.2f}</span></div>
+                        <div class='data-row'><span>VOLATILITY SKEW (PUT IV - CALL IV):</span><span style='color: {s_text}; font-weight: bold;'>{skew['skew']:+.2f}%</span></div>
+                        <p style='margin-top:10px; font-size:0.8rem;'>*A steepening skew means institutions are panic-buying OTM puts to protect long portfolios.</p>
+                    </div>
+                </div>
+                <div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {s_mandate} ]</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+# ==============================================================================
+# UI RENDERING: ROW 3 (THE RADARS)
+# ==============================================================================
+r_col1, r_col2 = st.columns([1, 1], gap="large")
+
+with r_col1:
     st.markdown("<div class='apex-header' style='margin-top: 20px;'>⚡ KINETIC RADAR (LIVE BREAKOUTS)</div>", unsafe_allow_html=True)
     with st.spinner("Scanning Lieutenants for volume ignition..."):
         radar_df = run_kinetic_radar()
@@ -428,17 +517,23 @@ with col3:
         else: 
             st.info("No Lieutenants meeting kinetic volume thresholds today.")
 
-with col4:
-    st.markdown("<div class='apex-header' style='margin-top: 20px;'>🦇 DARK POOL RADAR (BLOCK ACCUMULATION)</div>", unsafe_allow_html=True)
-    with st.spinner("Scanning for Institutional Volume Anomalies..."):
-        dp_df = run_dark_pool_radar()
-        if not dp_df.empty: 
-            st.dataframe(dp_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Vol Spike (x)": "{:.2f}x", "Price Compression": "{:.2f}x", "Price": "${:.2f}"}), use_container_width=True, height=200)
-        else: 
-            st.info("No Dark Pool signatures detected in the Lieutenant list today.")
+with r_col2:
+    st.markdown("<div class='apex-header' style='margin-top: 20px;'>🦇 DARK POOLS & INSIDER BLOCKS</div>", unsafe_allow_html=True)
+    tabs = st.tabs(["Dark Pool Compression", "C-Suite Insider Matrix"])
+    with tabs[0]:
+        with st.spinner("Scanning Institutional Anomalies..."):
+            dp_df = run_dark_pool_radar()
+            if not dp_df.empty: 
+                st.dataframe(dp_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Vol Spike (x)": "{:.2f}x", "Price Compression": "{:.2f}x", "Price": "${:.2f}"}), use_container_width=True, height=200)
+            else: 
+                st.info("No Dark Pool signatures detected today.")
+    with tabs[1]:
+        with st.spinner("Scraping SEC Form 4 Proxies..."):
+            insider_df = get_insider_signals()
+            st.dataframe(insider_df, use_container_width=True, height=200)
 
 # ==============================================================================
-# UI RENDERING: ROW 3 (INTERMARKET CAPITAL FLOW & RRG)
+# UI RENDERING: ROW 4 (INTERMARKET CAPITAL FLOW & RRG)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES)</div>", unsafe_allow_html=True)
 col5, col6 = st.columns([1, 1], gap="large")
@@ -483,7 +578,7 @@ with col6:
             st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 4 & 5 (RECON CHARTING & DECODER)
+# UI RENDERING: ROW 5 & 6 (RECON CHARTING & DECODER)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RECON (LIVE CHARTING)</div>", unsafe_allow_html=True)
 recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
@@ -491,7 +586,6 @@ recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
 with recon_col1:
     st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Target Acquisition Matrix</p>", unsafe_allow_html=True)
     
-    # --- The Cascading Selection Matrix ---
     target_category = st.selectbox("Category Lens:", ["Lieutenants (Watchlist)", "Indices", "Sectors (Macro)", "Subsectors (Micro)", "Thematic (AI/Crypto)"])
     
     if target_category == "Indices":
@@ -529,7 +623,7 @@ with recon_col2:
         else:
             st.error("Failed to load charting data. Check ticker symbol or network connection.")
 
-# --- ROW 5: DECODER MODULE ---
+# --- ROW 6: DECODER MODULE ---
 if last_data:
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>📝 EXECUTION & JOURNAL DECODER</div>", unsafe_allow_html=True)
     

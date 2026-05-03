@@ -71,3 +71,5 @@ LIEUTENANTS = list(dict.fromkeys(_all_targets)) # Removes duplicates automatical
 # ==============================================================================
 MIN_DONCHIAN_PROX = -2.0 
 MIN_VOLUME_SPIKE = 1.5
+
+FRED_API_KEY = 50ff1e637effabba2fe09afee01aae98

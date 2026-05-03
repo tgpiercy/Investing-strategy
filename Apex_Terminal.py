@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.23 + Ticker.History API Pivot)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.24 + Hybrid API Protocol)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -52,7 +52,7 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# DATA ENGINES (WITH .HISTORY() API PIVOT & WEEKEND ARMOR)
+# DATA ENGINES (HYBRID API PROTOCOL)
 # ==============================================================================
 @st.cache_data(ttl=300)
 def get_risk_engine():
@@ -60,8 +60,8 @@ def get_risk_engine():
         data = yf.download(["^VIX", "^VIX3M"], period="5d", progress=False)['Close']
         data = data.dropna()
         if data.empty: return {"status": "offline", "error": "API returned empty dataset"}
-        vix = data['^VIX'].iloc[-1]
-        vix3m = data['^VIX3M'].iloc[-1]
+        vix = float(data['^VIX'].iloc[-1])
+        vix3m = float(data['^VIX3M'].iloc[-1])
         return {"vix": vix, "vix3m": vix3m, "ratio": vix / vix3m, "status": "online"}
     except Exception as e: return {"status": "offline", "error": str(e)}
 
@@ -99,10 +99,13 @@ def get_gamma_walls():
     results = []
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
+            df = yf.download(ticker, period="5d", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            df = df.dropna()
+            if df.empty: continue
+            px = float(df['Close'].iloc[-1])
+            
             tk = yf.Ticker(ticker)
-            hist = tk.history(period="5d")
-            if hist.empty: continue
-            px = hist['Close'].iloc[-1]
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
@@ -119,13 +122,18 @@ def get_gamma_walls():
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
     try:
-        # Re-routed through individual Ticker().history() for ultimate stability
-        tk_hyg, tk_ief, tk_spy = yf.Ticker("HYG"), yf.Ticker("IEF"), yf.Ticker("SPY")
-        h_hyg, h_ief, h_spy = tk_hyg.history(period="6mo"), tk_ief.history(period="6mo"), tk_spy.history(period="6mo")
+        # yf.download sequence for max stability
+        df_hyg = yf.download("HYG", period="6mo", progress=False)
+        df_ief = yf.download("IEF", period="6mo", progress=False)
+        df_spy = yf.download("SPY", period="6mo", progress=False)
         
-        if h_hyg.empty or h_ief.empty or h_spy.empty: return {"status": "offline", "error": "Insufficient data overlay"}
+        if isinstance(df_hyg.columns, pd.MultiIndex): df_hyg.columns = df_hyg.columns.droplevel(1)
+        if isinstance(df_ief.columns, pd.MultiIndex): df_ief.columns = df_ief.columns.droplevel(1)
+        if isinstance(df_spy.columns, pd.MultiIndex): df_spy.columns = df_spy.columns.droplevel(1)
         
-        c_hyg, c_ief, c_spy = h_hyg['Close'], h_ief['Close'], h_spy['Close']
+        c_hyg, c_ief, c_spy = df_hyg['Close'].dropna(), df_ief['Close'].dropna(), df_spy['Close'].dropna()
+        if c_hyg.empty or c_ief.empty or c_spy.empty: return {"status": "offline", "error": "API returned empty dataset"}
+        
         if c_hyg.index.tz is not None: c_hyg.index = c_hyg.index.tz_localize(None)
         if c_ief.index.tz is not None: c_ief.index = c_ief.index.tz_localize(None)
         if c_spy.index.tz is not None: c_spy.index = c_spy.index.tz_localize(None)
@@ -135,21 +143,24 @@ def run_credit_stress_engine():
 
         df['Credit_Ratio'] = df['HYG'] / df['IEF']
         df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
-        spy_bullish = df['SPY'].iloc[-1] > df['SPY'].rolling(20).mean().iloc[-1]
-        credit_bearish = df['Credit_Ratio'].iloc[-1] < df['Ratio_20SMA'].iloc[-1]
+        spy_bullish = float(df['SPY'].iloc[-1]) > float(df['SPY'].rolling(20).mean().iloc[-1])
+        credit_bearish = float(df['Credit_Ratio'].iloc[-1]) < float(df['Ratio_20SMA'].iloc[-1])
         divergence = spy_bullish and credit_bearish
-        return {"status": "online", "divergence": divergence, "ratio": df['Credit_Ratio'].iloc[-1], "sma": df['Ratio_20SMA'].iloc[-1]}
+        return {"status": "online", "divergence": divergence, "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1])}
     except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
 def get_options_skew(ticker="SPY"):
     try:
+        df = yf.download(ticker, period="5d", progress=False)
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+        df = df.dropna()
+        if df.empty: return {"status": "offline", "error": "No price data (API Block)"}
+        px = float(df['Close'].iloc[-1])
+        
         tk = yf.Ticker(ticker)
-        hist = tk.history(period="5d")
-        if hist.empty: return {"status": "offline", "error": "No price data"}
-        px = hist['Close'].iloc[-1]
         exps = tk.options
-        if not exps: return {"status": "offline"}
+        if not exps: return {"status": "offline", "error": "Options chain unavailable"}
         chain = tk.option_chain(exps[min(1, len(exps)-1)])
         calls, puts = chain.calls, chain.puts
         pcr = puts['openInterest'].sum() / calls['openInterest'].sum() if calls['openInterest'].sum() > 0 else 1
@@ -182,15 +193,15 @@ def run_kinetic_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            tk = yf.Ticker(ticker)
-            df = tk.history(period="3mo")
+            df = yf.download(ticker, period="3mo", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna()
             if df.empty or len(df) < 40: continue
             
-            high = df['High'].rolling(40).max().iloc[-1]
-            close = df['Close'].iloc[-1]
-            vol = df['Volume'].iloc[-1]
-            vol_20 = df['Volume'].rolling(20).mean().iloc[-1]
+            high = float(df['High'].rolling(40).max().iloc[-1])
+            close = float(df['Close'].iloc[-1])
+            vol = float(df['Volume'].iloc[-1])
+            vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
             
             dist = ((close - high) / high) * 100
             v_spike = vol / vol_20 if vol_20 > 0 else 0
@@ -205,18 +216,18 @@ def run_dark_pool_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            tk = yf.Ticker(ticker)
-            df = tk.history(period="2mo")
+            df = yf.download(ticker, period="2mo", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna()
             if df.empty or len(df) < 20: continue
             
-            close = df['Close'].iloc[-1]
-            vol = df['Volume'].iloc[-1]
-            vol_20 = df['Volume'].rolling(20).mean().iloc[-1]
+            close = float(df['Close'].iloc[-1])
+            vol = float(df['Volume'].iloc[-1])
+            vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
             
             df['Range'] = df['High'] - df['Low']
-            atr_20 = df['Range'].rolling(20).mean().iloc[-1]
-            current_range = df['Range'].iloc[-1]
+            atr_20 = float(df['Range'].rolling(20).mean().iloc[-1])
+            current_range = float(df['Range'].iloc[-1])
             
             v_spike = vol / vol_20 if vol_20 > 0 else 0
             range_compression = current_range / atr_20 if atr_20 > 0 else 1
@@ -229,15 +240,17 @@ def run_dark_pool_radar():
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
     try:
-        tk1 = yf.Ticker(sym1)
-        df1 = tk1.history(period="1y")
-        if df1.empty: return {"status": "offline", "error": f"Failed to fetch {sym1}"}
+        df1 = yf.download(sym1, period="1y", progress=False)
+        if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.droplevel(1)
+        df1 = df1.dropna()
+        if df1.empty: return {"status": "offline", "error": f"API Blocked {sym1}"}
         c1 = df1['Close']
         if c1.index.tz is not None: c1.index = c1.index.tz_localize(None)
         
-        tk2 = yf.Ticker(sym2)
-        df2 = tk2.history(period="1y")
-        if df2.empty: return {"status": "offline", "error": f"Failed to fetch {sym2}"}
+        df2 = yf.download(sym2, period="1y", progress=False)
+        if isinstance(df2.columns, pd.MultiIndex): df2.columns = df2.columns.droplevel(1)
+        df2 = df2.dropna()
+        if df2.empty: return {"status": "offline", "error": f"API Blocked {sym2}"}
         c2 = df2['Close']
         if c2.index.tz is not None: c2.index = c2.index.tz_localize(None)
         
@@ -247,8 +260,8 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
         
-        current_ratio = df['Ratio'].iloc[-1]
-        current_sma = df['Ratio_50SMA'].iloc[-1]
+        current_ratio = float(df['Ratio'].iloc[-1])
+        current_sma = float(df['Ratio_50SMA'].iloc[-1])
         is_favored = current_ratio > current_sma
         
         return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
@@ -260,8 +273,8 @@ def run_master_screener():
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
         try:
-            tk = yf.Ticker(ticker)
-            df = tk.history(period="6mo")
+            df = yf.download(ticker, period="6mo", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna()
             if df.empty or len(df) < 50: continue
             
@@ -304,8 +317,9 @@ def run_rrg_engine(universe="Macro"):
         volumes = pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
-                tk = yf.Ticker(t)
-                d = tk.history(period="6mo")
+                d = yf.download(t, period="6mo", progress=False)
+                if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
+                d = d.dropna()
                 if not d.empty:
                     c_col = d['Close']
                     v_col = d['Volume']
@@ -327,10 +341,10 @@ def run_rrg_engine(universe="Macro"):
             vol_ratio = volumes[ticker] / volumes[ticker].rolling(20).mean()
             rs_ratio, rs_mom, vol_ratio = rs_ratio.dropna(), rs_mom.dropna(), vol_ratio.dropna()
             if not rs_ratio.empty and not rs_mom.empty:
-                current_vol_spike = vol_ratio.iloc[-1]
+                current_vol_spike = float(vol_ratio.iloc[-1])
                 dynamic_size = max(6, min(current_vol_spike * 8, 25))
                 results.append({
-                    "Ticker": ticker, "RS_Ratio": rs_ratio.iloc[-1], "RS_Mom": rs_mom.iloc[-1],     
+                    "Ticker": ticker, "RS_Ratio": float(rs_ratio.iloc[-1]), "RS_Mom": float(rs_mom.iloc[-1]),     
                     "Tail_X": rs_ratio.tail(5).tolist(), "Tail_Y": rs_mom.tail(5).tolist(),
                     "Bubble_Size": dynamic_size, "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
                 })
@@ -340,8 +354,8 @@ def run_rrg_engine(universe="Macro"):
 @st.cache_data(ttl=300)
 def run_tactical_chart(ticker):
     try:
-        tk = yf.Ticker(ticker)
-        df = tk.history(period="1y")
+        df = yf.download(ticker, period="1y", progress=False)
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna()
         if df.empty or len(df) < 50: return None, None
 

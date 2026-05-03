@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.25 + Dynamic Config Ingest)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.26 + IJR Breadth Patch)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -174,7 +174,6 @@ def get_options_skew(ticker="SPY"):
 @st.cache_data(ttl=86400)
 def get_insider_signals():
     results = []
-    # Dynamic scan of top setups instead of hardcoded to prevent API block
     scan_list = list(dict.fromkeys(cfg.AI_THEMATIC[:5] + cfg.CRYPTO_THEMATIC[:3])) 
     for ticker in scan_list:
         try:
@@ -270,7 +269,7 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
 @st.cache_data(ttl=900)
 def run_master_screener():
     results = []
-    tickers = cfg.LIEUTENANTS
+    tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="6mo", progress=False)
@@ -301,9 +300,8 @@ def run_master_screener():
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
-def run_rrg_engine(universe_key="Macro"):
+def run_rrg_engine(universe_key="Macro (Assets)"):
     try:
-        # Dynamic pull from the new centralized config
         universes = {
             "Macro (Assets)": {"benchmark": "SPY", "tickers": cfg.MACRO_ASSETS},
             "Sectors (S&P 500)": {"benchmark": "SPY", "tickers": cfg.SECTORS},
@@ -499,7 +497,7 @@ st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTAT
 rot_col1, rot_col2 = st.columns([1, 1], gap="large")
 
 with rot_col1:
-    rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (SLY / SPY)"])
+    rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (IJR / SPY)"])
     
     with rot_tabs[0]:
         with st.spinner("Calculating Intermarket See-Saw..."):
@@ -515,15 +513,15 @@ with rot_col1:
 
     with rot_tabs[1]:
         with st.spinner("Calculating Small-Cap Breadth..."):
-            sly_spy = run_rotation_engine("SLY", "SPY")
-            if sly_spy['status'] == 'online':
-                sly_favored = sly_spy['favored']
-                box_color, box_bg = ("#39FF14", "rgba(57, 255, 20, 0.05)") if sly_favored else ("#8b949e", "rgba(139, 148, 158, 0.05)")
-                status_text = "SMALL CAPS LEADING (RISK-ON BREADTH)" if sly_favored else "LARGE CAPS DEFENSIVE (NARROW MARKET)"
+            breadth_engine = run_rotation_engine("IJR", "SPY")
+            if breadth_engine['status'] == 'online':
+                breadth_favored = breadth_engine['favored']
+                box_color, box_bg = ("#39FF14", "rgba(57, 255, 20, 0.05)") if breadth_favored else ("#8b949e", "rgba(139, 148, 158, 0.05)")
+                status_text = "SMALL CAPS LEADING (RISK-ON BREADTH)" if breadth_favored else "LARGE CAPS DEFENSIVE (NARROW MARKET)"
                 st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
-                st.line_chart(sly_spy['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+                st.line_chart(breadth_engine['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
             else:
-                st.error(f"SLY/SPY Engine Offline: {sly_spy.get('error', 'Unknown Error')}")
+                st.error(f"Breadth Engine Offline: {breadth_engine.get('error', 'Unknown Error')}")
 
 with rot_col2:
     selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Crypto Proxy"], horizontal=True, label_visibility="collapsed")

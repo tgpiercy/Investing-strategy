@@ -836,4 +836,96 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         tact_stop_price = c - tact_dist
 
         d_col1, d_col2, d_col3, d_col4 = st.columns(4)
-        d_col1.markdown(f"<div class='tactical-card {'card-bullish' if trend_bull else 'card-bearish'}' style='min-height: 100px;'><div>
+        d_col1.markdown(f"<div class='tactical-card {'card-bullish' if trend_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>TREND (>50 SMA)</div><div class='price-text' style='color: {'#39FF14' if trend_bull else '#FF4444'};'>{'BULLISH' if trend_bull else 'BEARISH'}</div></div></div>", unsafe_allow_html=True)
+        d_col2.markdown(f"<div class='tactical-card {'card-bullish' if mom_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>MOMENTUM (9>21)</div><div class='price-text' style='color: {'#39FF14' if mom_bull else '#FF4444'};'>{'IGNITED' if mom_bull else 'LAGGING'}</div></div></div>", unsafe_allow_html=True)
+        d_col3.markdown(f"<div class='tactical-card {'card-bullish' if liq_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>LIQUIDITY (9>50 VOL)</div><div class='price-text' style='color: {'#39FF14' if liq_bull else '#FF4444'};'>{'EXPANDING' if liq_bull else 'CONTRACTING'}</div></div></div>", unsafe_allow_html=True)
+        d_col4.markdown(f"<div class='tactical-card {'card-squeeze' if dp_active else 'card-neutral'}' style='min-height: 100px;'><div><div class='metric-sub'>DARK POOL BLOCK</div><div class='price-text' style='color: {'#FFAA00' if dp_active else '#8b949e'};'>{'DETECTED' if dp_active else 'CLEAR'}</div></div></div>", unsafe_allow_html=True)
+        
+        st.markdown(f"""
+        <div style='background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px; margin-top: 20px;'>
+            <b style='color: #58a6ff;'>RISK DRAWDOWN MATRIX</b><br><br>
+            <div style='display: flex; justify-content: space-between; border-bottom: 1px dashed rgba(139, 148, 158, 0.2); padding-bottom: 10px; margin-bottom: 10px;'>
+                <span style='color: #8b949e;'>Structural Risk (To 50 SMA):</span>
+                <span style='color: #FFF; font-weight: bold;'>Stop: ${last_data['SMA_50']:.2f} | Risk: -${abs(struct_dist):.2f} / Share ({abs(struct_pct):.2f}%)</span>
+            </div>
+            <div style='display: flex; justify-content: space-between;'>
+                <span style='color: #8b949e;'>Tactical Risk (2x ATR Trailing):</span>
+                <span style='color: #FFF; font-weight: bold;'>Stop: ${tact_stop_price:.2f} | Risk: -${tact_dist:.2f} / Share ({tact_pct:.2f}%)</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | T: {'BULL' if trend_bull else 'BEAR'} | M: {'IGNITED' if mom_bull else 'LAGGING'} | L: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} | STRUC RSK: {abs(struct_pct):.2f}% | TACT RSK: {tact_pct:.2f}%"
+        st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
+        st.code(journal_str, language="text")
+
+# ==============================================================================
+# ROUTING LOGIC: BACKTESTER LAB
+# ==============================================================================
+elif app_mode == "🧪 BACKTESTER LAB":
+    st.markdown("<div class='apex-header'>🔬 QUANTITATIVE BACKTESTER LAB</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Run historical, path-dependent simulations using the Titan Omega logic to mathematically validate edge.</p>", unsafe_allow_html=True)
+
+    bk_col1, bk_col2, bk_col3 = st.columns([2, 2, 1])
+    with bk_col1:
+        test_ticker = st.text_input("Enter Ticker Symbol:", value="NVDA", max_chars=10).upper()
+    with bk_col2:
+        test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y", "max"], index=2)
+    with bk_col3:
+        st.write("") # Spacing
+        st.write("")
+        run_sim = st.button("RUN SIMULATION", use_container_width=True)
+
+    if run_sim:
+        with st.spinner(f"Ingesting {test_period} of historical data for {test_ticker}..."):
+            df_signals = build_signal_engine(test_ticker, test_period)
+            
+            if df_signals.empty:
+                st.error(f"Failed to fetch data for {test_ticker}. Verify ticker or API limits.")
+            else:
+                with st.spinner("Executing path-dependent state machine (calculating trailing stops)..."):
+                    ledger_df = run_execution_engine(df_signals, test_ticker)
+                    
+                    if ledger_df.empty:
+                        st.warning("Zero trades executed. The Titan Omega criteria did not trigger during this period.")
+                    else:
+                        st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>📊 PERFORMANCE LEDGER</h3>", unsafe_allow_html=True)
+                        
+                        # Calculate Analytics
+                        total_trades = len(ledger_df)
+                        winning_trades = ledger_df[ledger_df['PnL (%)'] > 0]
+                        losing_trades = ledger_df[ledger_df['PnL (%)'] <= 0]
+                        
+                        win_rate = (len(winning_trades) / total_trades) * 100
+                        avg_win = winning_trades['PnL (%)'].mean() if not winning_trades.empty else 0.0
+                        avg_loss = losing_trades['PnL (%)'].mean() if not losing_trades.empty else 0.0
+                        
+                        loss_rate_decimal = len(losing_trades) / total_trades
+                        win_rate_decimal = win_rate / 100
+                        expectancy = (win_rate_decimal * avg_win) / (loss_rate_decimal * abs(avg_loss)) if loss_rate_decimal > 0 and avg_loss != 0 else float('inf')
+                        
+                        multipliers = 1 + (ledger_df['PnL (%)'] / 100)
+                        total_roi_pct = (multipliers.prod() - 1) * 100
+
+                        # Render Metrics
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("System Win Rate", f"{win_rate:.1f}%")
+                        m2.metric("Expectancy Ratio", f"{expectancy:.2f}")
+                        m3.metric("Total ROI (Compounded)", f"{total_roi_pct:.1f}%")
+                        m4.metric("Total Executions", total_trades)
+
+                        st.markdown("---")
+                        
+                        m5, m6 = st.columns(2)
+                        m5.metric("Average Winning Trade", f"+{avg_win:.2f}%")
+                        m6.metric("Average Losing Trade", f"{avg_loss:.2f}%")
+
+                        st.markdown("<h3 style='color: #FFF; margin-top: 40px;'>🧾 TRADE LOG</h3>", unsafe_allow_html=True)
+                        
+                        # Formatting for UI Display
+                        display_df = ledger_df.copy()
+                        display_df['Entry Price'] = display_df['Entry Price'].map('${:,.2f}'.format)
+                        display_df['Exit Price'] = display_df['Exit Price'].map('${:,.2f}'.format)
+                        display_df['PnL (%)'] = display_df['PnL (%)'].map('{:+.2f}%'.format)
+                        
+                        st.dataframe(display_df, width="stretch", hide_index=True)

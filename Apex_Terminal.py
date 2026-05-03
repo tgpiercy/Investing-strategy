@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.27 + Integrated Backtester Lab)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.28 + Kinetic Backtest Patch)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.27<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.28<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -431,7 +431,9 @@ def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
     ema_above_today = df['EMA_9'] > df['EMA_21']
     ema_below_yesterday = df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)
     kinetic_cross = ema_above_today & ema_below_yesterday
-    liquidity_expanding = df['Vol_SMA_9'] > df['Vol_SMA_50']
+    
+    # V5.28 FIX: Kinetic Ignition (Today's Volume > 1.2x of 20-Day Average)
+    liquidity_expanding = df['Volume'] > (df['Vol_SMA_20'] * 1.2)
 
     df['Signal_Long'] = trend_bullish & kinetic_cross & liquidity_expanding
     return df.dropna()

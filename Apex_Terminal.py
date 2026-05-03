@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.33 + FRED Firewall Bypass)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.34 + FRED Timeout Patch)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.33<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.34<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -153,17 +153,16 @@ def get_gamma_walls():
 
 @st.cache_data(ttl=86400)
 def get_fomc_data():
-    """V5.33 FIX: FRED API Firewall Bypass (User-Agent Spoofing)"""
+    """V5.34 FIX: Extended Timeout for FRED API"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        timeout_limit = 30  # Increased to 30 seconds
         
-        # Fetch 10Y-2Y Yield Curve
-        res_yc = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y", headers=headers, timeout=10)
+        res_yc = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y", headers=headers, timeout=timeout_limit)
         if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED Blocked T10Y2Y (Status: {res_yc.status_code})"}
         df_yc = pd.read_csv(io.StringIO(res_yc.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
         
-        # Fetch Fed Funds Rate
-        res_ff = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF", headers=headers, timeout=10)
+        res_ff = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF", headers=headers, timeout=timeout_limit)
         if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED Blocked DFF (Status: {res_ff.status_code})"}
         df_ff = pd.read_csv(io.StringIO(res_ff.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
         
@@ -175,6 +174,8 @@ def get_fomc_data():
         
         status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
         return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
+    except requests.exceptions.Timeout:
+        return {"status": "offline", "error": "FRED API Connection Timed Out (>30s). Institutional Server Sluggish."}
     except Exception as e:
         return {"status": "offline", "error": str(e)}
 
@@ -586,7 +587,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
-    # --- V5.33 FOMC LIQUIDITY MODULE ---
+    # --- V5.34 FOMC LIQUIDITY MODULE ---
     st.markdown("<div class='apex-header' style='margin-top: 20px;'>🏛️ FOMC LIQUIDITY & YIELD CURVE (MACRO PLUMBING)</div>", unsafe_allow_html=True)
     with st.spinner("Fetching FRED Macro Data..."):
         fomc = get_fomc_data()

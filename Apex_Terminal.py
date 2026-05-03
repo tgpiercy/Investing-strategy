@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.19 + Syntax Patch)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.20 + RRG Restored + SLY/RSP)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -160,72 +160,99 @@ def get_insider_signals():
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=900)
+def run_kinetic_radar():
+    results = []
+    for ticker in cfg.LIEUTENANTS:
+        try:
+            df = yf.download(ticker, period="3mo", progress=False, auto_adjust=True)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            if df.empty or len(df) < 40: continue
+            df = df.dropna()
+            
+            high = df['High'].rolling(40).max().iloc[-1]
+            close = df['Close'].iloc[-1]
+            vol = df['Volume'].iloc[-1]
+            vol_20 = df['Volume'].rolling(20).mean().iloc[-1]
+            
+            dist = ((close - high) / high) * 100
+            v_spike = vol / vol_20 if vol_20 > 0 else 0
+            
+            if dist >= cfg.MIN_DONCHIAN_PROX and v_spike >= cfg.MIN_VOLUME_SPIKE: 
+                results.append({"Ticker": ticker, "Dist to High (%)": dist, "Vol Spike (x)": v_spike, "Price": close})
+        except: pass
+    return pd.DataFrame(results)
+
+@st.cache_data(ttl=900)
+def run_dark_pool_radar():
+    results = []
+    for ticker in cfg.LIEUTENANTS:
+        try:
+            df = yf.download(ticker, period="2mo", progress=False, auto_adjust=True)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            if df.empty or len(df) < 20: continue
+            df = df.dropna()
+            
+            close = df['Close'].iloc[-1]
+            vol = df['Volume'].iloc[-1]
+            vol_20 = df['Volume'].rolling(20).mean().iloc[-1]
+            
+            df['Range'] = df['High'] - df['Low']
+            atr_20 = df['Range'].rolling(20).mean().iloc[-1]
+            current_range = df['Range'].iloc[-1]
+            
+            v_spike = vol / vol_20 if vol_20 > 0 else 0
+            range_compression = current_range / atr_20 if atr_20 > 0 else 1
+            
+            if v_spike >= 1.5 and range_compression <= 0.75: 
+                results.append({"Ticker": ticker, "Vol Spike (x)": v_spike, "Price Compression": range_compression, "Price": close})
+        except: pass
+    return pd.DataFrame(results)
+
+@st.cache_data(ttl=3600)
+def run_rotation_engine(sym1="SPY", sym2="DBC"):
+    try:
+        df = yf.download([sym1, sym2], period="1y", progress=False)['Close']
+        df = df.dropna()
+        df['Ratio'] = df[sym1] / df[sym2]
+        df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
+        current_ratio = df['Ratio'].iloc[-1]
+        current_sma = df['Ratio_50SMA'].iloc[-1]
+        is_favored = current_ratio > current_sma
+        return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
+    except Exception as e: return {"status": "offline", "error": str(e)}
+
+@st.cache_data(ttl=900)
 def run_master_screener():
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
-    
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="6mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): 
-                df.columns = df.columns.droplevel(1)
-            
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna()
             if len(df) < 50: continue
             
-            c = float(df['Close'].iloc[-1])
-            v = float(df['Volume'].iloc[-1])
-            
+            c, v = float(df['Close'].iloc[-1]), float(df['Volume'].iloc[-1])
             sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
-            ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
-            ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
-            
-            vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
-            vol_sma_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-            vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
-            
+            ema_9, ema_21 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1]), float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
+            vol_sma_9, vol_sma_20, vol_sma_50 = float(df['Volume'].rolling(9).mean().iloc[-1]), float(df['Volume'].rolling(20).mean().iloc[-1]), float(df['Volume'].rolling(50).mean().iloc[-1])
             atr_20 = float((df['High'] - df['Low']).rolling(20).mean().iloc[-1])
             rng = float(df['High'].iloc[-1] - df['Low'].iloc[-1])
             
-            trend = c > sma_50
-            mom = ema_9 > ema_21
-            liq = vol_sma_9 > vol_sma_50
+            trend, mom, liq = c > sma_50, ema_9 > ema_21, vol_sma_9 > vol_sma_50
             dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
             dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
             
             score = sum([trend, mom, liq, dp_vol, dp_comp])
-            
             if score == 5: cat = "🔥 TIER 1: PERFECT SETUP"
             elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH ACCUMULATION"
             elif mom and liq: cat = "🚀 KINETIC BREAKOUT"
             else: cat = "STANDBY"
             
             if cat != "STANDBY":
-                results.append({
-                    "Ticker": ticker, 
-                    "Price": f"${c:.2f}", 
-                    "Titan Score": f"{score}/5",
-                    "Category": cat, 
-                    "Volume": f"{v/vol_sma_20:.1f}x", 
-                    "Compression": f"{rng/atr_20:.2f}x"
-                })
-        except Exception:
-            pass
-            
+                results.append({"Ticker": ticker, "Price": f"${c:.2f}", "Titan Score": f"{score}/5", "Category": cat, "Volume": f"{v/vol_sma_20:.1f}x", "Compression": f"{rng/atr_20:.2f}x"})
+        except Exception: pass
     return pd.DataFrame(results)
-
-@st.cache_data(ttl=3600)
-def run_rotation_engine():
-    try:
-        df = yf.download(["SPY", "DBC"], period="1y", progress=False)['Close']
-        df = df.dropna()
-        df['Ratio'] = df['SPY'] / df['DBC']
-        df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
-        current_ratio = df['Ratio'].iloc[-1]
-        current_sma = df['Ratio_50SMA'].iloc[-1]
-        is_equity_favored = current_ratio > current_sma
-        return {"status": "online", "equity_favored": is_equity_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
-    except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def run_rrg_engine(universe="Macro"):
@@ -241,26 +268,20 @@ def run_rrg_engine(universe="Macro"):
         tickers = universes[universe]["tickers"]
         all_symbols = tickers + [benchmark]
         df = yf.download(all_symbols, period="6mo", progress=False)
-        closes = df['Close'].dropna()
-        volumes = df['Volume'].dropna()
+        closes, volumes = df['Close'].dropna(), df['Volume'].dropna()
         results = []
         for ticker in tickers:
             if ticker not in closes.columns or benchmark not in closes.columns: continue
             rs = closes[ticker] / closes[benchmark]
-            rs_ratio = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100
-            rs_mom = (rs_ratio / rs_ratio.rolling(10).mean()) * 100
-            vol_20sma = volumes[ticker].rolling(20).mean()
-            vol_ratio = volumes[ticker] / vol_20sma
-            rs_ratio = rs_ratio.dropna()
-            rs_mom = rs_mom.dropna()
-            vol_ratio = vol_ratio.dropna()
+            rs_ratio, rs_mom = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100, ((rs.rolling(10).mean() / rs.rolling(40).mean()) * 100 / (rs.rolling(10).mean() / rs.rolling(40).mean() * 100).rolling(10).mean()) * 100
+            vol_ratio = volumes[ticker] / volumes[ticker].rolling(20).mean()
+            rs_ratio, rs_mom, vol_ratio = rs_ratio.dropna(), rs_mom.dropna(), vol_ratio.dropna()
             if not rs_ratio.empty and not rs_mom.empty:
                 current_vol_spike = vol_ratio.iloc[-1]
-                dynamic_size = max(6, min(current_vol_spike * 8, 25))
                 results.append({
                     "Ticker": ticker, "RS_Ratio": rs_ratio.iloc[-1], "RS_Mom": rs_mom.iloc[-1],     
                     "Tail_X": rs_ratio.tail(5).tolist(), "Tail_Y": rs_mom.tail(5).tolist(),
-                    "Bubble_Size": dynamic_size, "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
+                    "Bubble_Size": max(6, min(current_vol_spike * 8, 25)), "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
                 })
         return {"status": "online", "data": results, "benchmark": benchmark}
     except Exception as e: return {"status": "offline", "error": str(e)}
@@ -275,15 +296,10 @@ def run_tactical_chart(ticker):
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
-        df['Vol_SMA_9'] = df['Volume'].rolling(window=9).mean()
-        df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
-        df['Vol_SMA_50'] = df['Volume'].rolling(window=50).mean()
-
-        df['Range'] = df['High'] - df['Low']
-        df['ATR_20'] = df['Range'].rolling(window=20).mean()
-        
+        df['Vol_SMA_9'], df['Vol_SMA_20'], df['Vol_SMA_50'] = df['Volume'].rolling(window=9).mean(), df['Volume'].rolling(window=20).mean(), df['Volume'].rolling(window=50).mean()
+        df['ATR_20'] = (df['High'] - df['Low']).rolling(window=20).mean()
         df['Vol_Ratio'] = np.where(df['Vol_SMA_20'] > 0, df['Volume'] / df['Vol_SMA_20'], 0)
-        df['Range_Comp'] = np.where(df['ATR_20'] > 0, df['Range'] / df['ATR_20'], 1)
+        df['Range_Comp'] = np.where(df['ATR_20'] > 0, (df['High'] - df['Low']) / df['ATR_20'], 1)
         
         dp_mask = (df['Vol_Ratio'] >= 1.5) & (df['Range_Comp'] <= 0.75)
         dp_signals = df[dp_mask]
@@ -300,14 +316,11 @@ def run_tactical_chart(ticker):
             fig.add_trace(go.Scatter(
                 x=dp_signals.index, y=dp_signals['Close'], mode='markers',
                 marker=dict(color='rgba(138, 43, 226, 0.75)', size=bubble_sizes, line=dict(color='#FFFFFF', width=2)),
-                name='Dark Pool Block',
-                hovertext=[f"Vol Spike: {r:.2f}x<br>Compression: {c:.2f}x" for r, c in zip(dp_signals['Vol_Ratio'], dp_signals['Range_Comp'])],
-                hoverinfo="text+x+y"
+                name='Dark Pool Block', hovertext=[f"Vol Spike: {r:.2f}x<br>Compression: {c:.2f}x" for r, c in zip(dp_signals['Vol_Ratio'], dp_signals['Range_Comp'])], hoverinfo="text+x+y"
             ), row=1, col=1)
 
         colors = ['rgba(57, 255, 20, 0.6)' if row['Close'] >= row['Open'] else 'rgba(255, 68, 68, 0.6)' for idx, row in df.iterrows()]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-        
         fig.add_trace(go.Scatter(x=df.index, y=df['Vol_SMA_50'], line=dict(color='#8b949e', width=1.5, dash='dot'), name='50 Vol SMA'), row=2, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['Vol_SMA_20'], line=dict(color='#58a6ff', width=2), name='20 Vol SMA'), row=2, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['Vol_SMA_9'], line=dict(color='#39FF14', width=1.5), name='9 Vol SMA'), row=2, col=1)
@@ -336,7 +349,7 @@ with st.spinner("Calibrating Volatility Engines..."):
         st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M: {r:.2f})</span></div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: MACRO & DEALER MATRIX
+# UI RENDERING: ROW 1 (MACRO & DEALER MATRIX)
 # ==============================================================================
 col1, col2 = st.columns([1, 1], gap="large")
 with col1:
@@ -361,7 +374,7 @@ with col2:
         st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: CREDIT & SKEW
+# UI RENDERING: ROW 2 (CREDIT & SKEW)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
 c_col1, c_col2 = st.columns([1, 1], gap="large")
@@ -378,6 +391,92 @@ with c_col2:
         st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
+# UI RENDERING: ROW 3 (RADARS & DARK POOLS/INSIDERS) - RESTORED
+# ==============================================================================
+r_col1, r_col2 = st.columns([1, 1], gap="large")
+with r_col1:
+    st.markdown("<div class='apex-header' style='margin-top: 20px;'>⚡ KINETIC RADAR (LIVE BREAKOUTS)</div>", unsafe_allow_html=True)
+    with st.spinner("Scanning Lieutenants for volume ignition..."):
+        radar_df = run_kinetic_radar()
+        if not radar_df.empty: 
+            st.dataframe(radar_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Dist to High (%)": "{:+.2f}%", "Vol Spike (x)": "{:.2f}x", "Price": "${:.2f}"}), width="stretch", height=200)
+        else: 
+            st.info("No Lieutenants meeting kinetic volume thresholds today.")
+
+with r_col2:
+    st.markdown("<div class='apex-header' style='margin-top: 20px;'>🦇 DARK POOLS & INSIDER BLOCKS</div>", unsafe_allow_html=True)
+    tabs = st.tabs(["Dark Pool Compression", "C-Suite Insider Matrix"])
+    with tabs[0]:
+        with st.spinner("Scanning Institutional Anomalies..."):
+            dp_df = run_dark_pool_radar()
+            if not dp_df.empty: 
+                st.dataframe(dp_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Vol Spike (x)": "{:.2f}x", "Price Compression": "{:.2f}x", "Price": "${:.2f}"}), width="stretch", height=200)
+            else: 
+                st.info("No Dark Pool signatures detected today.")
+    with tabs[1]:
+        with st.spinner("Scraping SEC Form 4 Proxies..."):
+            insider_df = get_insider_signals()
+            st.dataframe(insider_df, width="stretch", height=200)
+
+# ==============================================================================
+# UI RENDERING: ROW 4 (MACRO ROTATION & RRG) - RESTORED & UPGRADED WITH SLY/RSP
+# ==============================================================================
+st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES vs BREADTH)</div>", unsafe_allow_html=True)
+rot_col1, rot_col2 = st.columns([1, 1], gap="large")
+
+with rot_col1:
+    rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (SLY / RSP)"])
+    
+    with rot_tabs[0]:
+        with st.spinner("Calculating Intermarket See-Saw..."):
+            spy_dbc = run_rotation_engine("SPY", "DBC")
+            if spy_dbc['status'] == 'online':
+                eq_favored = spy_dbc['favored']
+                box_color, box_bg = ("#39FF14", "rgba(57, 255, 20, 0.05)") if eq_favored else ("#FFAA00", "rgba(255, 170, 0, 0.05)")
+                status_text = "EQUITIES DOMINATING" if eq_favored else "COMMODITIES DOMINATING"
+                st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
+                st.line_chart(spy_dbc['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+
+    with rot_tabs[1]:
+        with st.spinner("Calculating Equal Weight Breadth..."):
+            sly_rsp = run_rotation_engine("SLY", "RSP")
+            if sly_rsp['status'] == 'online':
+                sly_favored = sly_rsp['favored']
+                box_color, box_bg = ("#39FF14", "rgba(57, 255, 20, 0.05)") if sly_favored else ("#8b949e", "rgba(139, 148, 158, 0.05)")
+                status_text = "SMALL CAPS LEADING (RISK-ON BREADTH)" if sly_favored else "LARGE CAPS DEFENSIVE (NARROW MARKET)"
+                st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
+                st.line_chart(sly_rsp['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+
+with rot_col2:
+    selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Global Indices"], horizontal=True, label_visibility="collapsed")
+    with st.spinner(f"Mapping {selected_universe}..."):
+        rrg_engine = run_rrg_engine(selected_universe)
+        if rrg_engine['status'] == 'online':
+            fig = go.Figure()
+            fig.add_hline(y=100, line_dash="dash", line_color="#30363d", layer="below")
+            fig.add_vline(x=100, line_dash="dash", line_color="#30363d", layer="below")
+            fig.add_annotation(x=101, y=101, text="LEADING", showarrow=False, font=dict(color="#39FF14", size=14), opacity=0.3)
+            fig.add_annotation(x=101, y=99, text="WEAKENING", showarrow=False, font=dict(color="#FFAA00", size=14), opacity=0.3)
+            fig.add_annotation(x=99, y=99, text="LAGGING", showarrow=False, font=dict(color="#FF4444", size=14), opacity=0.3)
+            fig.add_annotation(x=99, y=101, text="IMPROVING", showarrow=False, font=dict(color="#58a6ff", size=14), opacity=0.3)
+
+            for item in rrg_engine['data']:
+                if item["RS_Ratio"] > 100 and item["RS_Mom"] > 100: color = "#39FF14"
+                elif item["RS_Ratio"] > 100 and item["RS_Mom"] < 100: color = "#FFAA00"
+                elif item["RS_Ratio"] < 100 and item["RS_Mom"] < 100: color = "#FF4444"
+                else: color = "#58a6ff"
+                
+                fig.add_trace(go.Scatter(
+                    x=item["Tail_X"], y=item["Tail_Y"], mode='lines+markers+text', name=item["Ticker"],
+                    text=[None, None, None, None, item["Ticker"]], textposition="top center", hovertext=f"Vol: {item['Vol_Spike_Text']}",
+                    marker=dict(size=[4, 4, 4, 4, item["Bubble_Size"]], color=color, line=dict(width=1, color="#FFF") if item["Bubble_Size"] > 10 else dict(width=0)),
+                    line=dict(width=2, color=color)
+                ))
+            
+            fig.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9'), xaxis=dict(title='Relative Strength vs Benchmark', gridcolor='#30363d', zeroline=False), yaxis=dict(title='Momentum', gridcolor='#30363d', zeroline=False), margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=400)
+            st.plotly_chart(fig, width="stretch")
+
+# ==============================================================================
 # UI RENDERING: ROW 5 (THE GLOBAL SCREENER)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTER SCREENER (ALL LIEUTENANTS)</div>", unsafe_allow_html=True)
@@ -392,7 +491,7 @@ if st.button("EXECUTE GLOBAL SCAN"):
             st.info("No actionable Tier 1 or Stealth setups detected across the universe today.")
 
 # ==============================================================================
-# UI RENDERING: RECON & DECODER
+# UI RENDERING: ROW 6 (TACTICAL RECON & DECODER)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RECON & DECODER</div>", unsafe_allow_html=True)
 recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
@@ -417,7 +516,6 @@ if last_data:
     liq_bull = last_data['Vol_SMA_9'] > last_data['Vol_SMA_50']
     dp_active = (last_data['Vol_Ratio'] >= 1.5) and (last_data['Range_Comp'] <= 0.75)
     
-    # RESTORED MISSING RISK CALCULATION VARIABLES
     struct_dist = c - last_data['SMA_50']
     struct_pct = (struct_dist / c) * 100
     tact_dist = 2 * last_data['ATR_20']

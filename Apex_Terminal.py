@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.28 + Kinetic Backtest Patch)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.29 + Multi-Tier Dealer Matrix)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.28<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.29<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -102,6 +102,7 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
+    """V5.29 Multi-Tier Dealer Matrix Engine"""
     results = []
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
@@ -115,12 +116,37 @@ def get_gamma_walls():
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
-            c_wall = chain.calls.loc[chain.calls['openInterest'].idxmax()]
-            p_wall = chain.puts.loc[chain.puts['openInterest'].idxmax()]
+            
+            # Sort for Top 2 Strikes by OI
+            calls = chain.calls.sort_values(by='openInterest', ascending=False)
+            puts = chain.puts.sort_values(by='openInterest', ascending=False)
+            
+            if calls.empty or puts.empty: continue
+                
+            c_wall_1 = calls.iloc[0]['strike']
+            c_wall_2 = calls.iloc[1]['strike'] if len(calls) > 1 else c_wall_1
+            p_wall_1 = puts.iloc[0]['strike']
+            p_wall_2 = puts.iloc[1]['strike'] if len(puts) > 1 else p_wall_1
+            
+            # Zero-Gamma Proxy Calculation (Max Combined OI)
+            merged = pd.merge(chain.calls[['strike', 'openInterest']], 
+                              chain.puts[['strike', 'openInterest']], 
+                              on='strike', how='outer').fillna(0)
+            merged['total_oi'] = merged['openInterest_x'] + merged['openInterest_y']
+            zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
+
+            # Ensure Tier 1 is always the closest wall, Tier 2 is the furthest for visual logic
+            if c_wall_1 > c_wall_2: c_wall_1, c_wall_2 = c_wall_2, c_wall_1
+            if p_wall_1 < p_wall_2: p_wall_1, p_wall_2 = p_wall_2, p_wall_1
+
             results.append({
-                "Ticker": ticker, "Price": px, "Call Wall": c_wall['strike'], 
-                "Dist to Call": ((c_wall['strike'] - px) / px) * 100, 
-                "Put Wall": p_wall['strike'], "Dist to Put": ((px - p_wall['strike']) / px) * 100
+                "Ticker": ticker, 
+                "Price": px, 
+                "Zero Gamma": zero_gamma,
+                "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, 
+                "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, 
+                "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100,
+                "Put Wall 2": p_wall_2, "Dist PW2": ((px - p_wall_2) / px) * 100
             })
         except: pass
     return results
@@ -432,7 +458,7 @@ def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
     ema_below_yesterday = df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)
     kinetic_cross = ema_above_today & ema_below_yesterday
     
-    # V5.28 FIX: Kinetic Ignition (Today's Volume > 1.2x of 20-Day Average)
+    # Kinetic Ignition (Today's Volume > 1.2x of 20-Day Average)
     liquidity_expanding = df['Volume'] > (df['Vol_SMA_20'] * 1.2)
 
     df['Signal_Long'] = trend_bullish & kinetic_cross & liquidity_expanding
@@ -527,15 +553,37 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>{row['Asset']}</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>BIAS:</span><span style='color:{tc}; font-weight:bold;'>{'NET LONG' if l else 'NET SHORT'} ({i:.1f}%)</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='apex-header'>☢️ DEALER MATRIX (GAMMA WALLS)</div>", unsafe_allow_html=True)
-        with st.spinner("Scanning Indices..."):
+        st.markdown("<div class='apex-header'>☢️ DEALER MATRIX (MULTI-TIER GAMMA)</div>", unsafe_allow_html=True)
+        with st.spinner("Scanning Institutional Options Chains..."):
             for g in get_gamma_walls():
-                c_dist, p_dist = g['Dist to Call'], g['Dist to Put']
-                if c_dist < 0: cc, mc, m, ct = "card-squeeze", "mandate-buy", "SHORT GAMMA - MAX LONGS", f"<span style='color:#39FF14;'>⚠️ BREACHED</span>"
-                elif p_dist > 0: cc, mc, m, ct = "card-bearish", "mandate-sell", "LONG GAMMA - RESISTANCE", f"{c_dist:+.2f}%"
-                else: cc, mc, m, ct = "card-neutral", "mandate-warn", "TRAPPED IN CHOP", f"{c_dist:+.2f}%"
-                pt = f"<span style='color:#FF4444;'>⚠️ BREACHED</span>" if p_dist > 0 else f"{p_dist:+.2f}%"
-                st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
+                zg = g['Zero Gamma']
+                c1, c2 = g['Call Wall 1'], g['Call Wall 2']
+                p1, p2 = g['Put Wall 1'], g['Put Wall 2']
+                px = g['Price']
+
+                # Volatility Switch State
+                if px >= zg:
+                    vol_state = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>"
+                    cc_main = "card-neutral"
+                else:
+                    vol_state = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>"
+                    cc_main = "card-bearish"
+
+                st.markdown(f"""
+                <div class='tactical-card {cc_main}'>
+                    <div style='display:flex; justify-content:space-between; align-items:center;'>
+                        <div class='asset-title'>{g['Ticker']} <span style='font-size:0.8rem; color:#8b949e;'>${px:.2f}</span></div>
+                        <div style='font-size:0.85rem; font-weight:bold;'>{vol_state}</div>
+                    </div>
+                    <div class='metric-sub' style='margin-top:10px;'>
+                        <div class='data-row'><span>T2 Call (Squeeze): <b style='color:#FFAA00;'>${c2:.2f}</b></span><span>{g['Dist CW2']:+.1f}%</span></div>
+                        <div class='data-row'><span>T1 Call (Ceiling): <b style='color:#FFF;'>${c1:.2f}</b></span><span>{g['Dist CW1']:+.1f}%</span></div>
+                        <div class='data-row' style='background:rgba(255,255,255,0.05); padding:2px 5px;'><span>Zero-Gamma (Flip): <b style='color:#58a6ff;'>${zg:.2f}</b></span><span>{((zg-px)/px)*100:+.1f}%</span></div>
+                        <div class='data-row'><span>T1 Put (Floor): <b style='color:#FFF;'>${p1:.2f}</b></span><span>{g['Dist PW1']:+.1f}%</span></div>
+                        <div class='data-row'><span>T2 Put (Abyss): <b style='color:#FF4444;'>${p2:.2f}</b></span><span>{g['Dist PW2']:+.1f}%</span></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
     c_col1, c_col2 = st.columns([1, 1], gap="large")

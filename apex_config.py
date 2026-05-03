@@ -1,42 +1,73 @@
 # FILE: apex_config.py
 # ROLE: Master Configuration & Radar Parameters
-# ARCHITECTURE: Global Variable Engine
+# ARCHITECTURE: Global Variable Engine & Dynamic Universe Aggregation
 
 # ==============================================================================
-# 1. THE LIEUTENANTS (Target Acquisition List)
+# 1. THE TARGET UNIVERSES (Cascading Matrix)
 # ==============================================================================
-# This is the primary universe of assets the Kinetic and Dark Pool Radars will scan.
-# To maintain high-speed API performance, keep this list under 50 highly liquid targets.
 
-LIEUTENANTS = [
-    # Mega-Cap Tech & Core Indices
-    "SPY", "QQQ", "IWM", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA",
-    
-    # AI & Tech Infrastructure (The High-Beta Matrix)
-    "NVDA", "AMD", "AVGO", "SMCI", "ANET", "VRT", "PLTR", "TSM", "ARM", "MU",
-    
-    # Financials (Liquidity Proxies)
-    "JPM", "GS", "MS", "BAC", 
-    
-    # Hard Assets & Energy (Inflation/War Hedges)
-    "XOM", "CVX", "SLB", "COP", "OXY", "USO", "GLD",
-    
-    # Industrials, Defense & Crypto Proxies
-    "CAT", "GE", "LMT", "RTX", "MSTR", "COIN"
+MACRO_ASSETS = [
+    "SPY", "QQQ", "IWM", "DIA", # Core Equities
+    "USO", "GLD", "SLV", "DBC", # Commodities
+    "TLT", "UUP"                # Bonds & Dollar
+]
+
+SECTORS = [
+    "XLK", # Tech
+    "XLF", # Financials
+    "XLV", # Healthcare
+    "XLE", # Energy
+    "XLY", # Consumer Discretionary
+    "XLI", # Industrials
+    "XLP", # Consumer Staples
+    "XLU", # Utilities
+    "XLB", # Materials
+    "XLRE" # Real Estate
+]
+
+SUBSECTORS = [
+    "SMH",  # Semiconductors (Highly Liquid)
+    "XBI",  # Biotech (Speculative Risk Proxy)
+    "KRE",  # Regional Banks (Domestic Credit Health)
+    "ITB",  # Homebuilders (Interest Rate Sensitivity)
+    "XOP",  # Oil & Gas Exploration
+    "OIH",  # Oil Services
+    "XRT",  # Retail
+    "IYT",  # Transports (Dow Theory)
+    "ITA",  # Aerospace & Defense
+    "CIBR", # Cybersecurity
+    "URA",  # Uranium / Nuclear
+    "COPX", # Copper Miners (Global Growth Proxy)
+    "GDX"   # Gold Miners
+]
+
+# The AI Supply Chain Matrix
+AI_THEMATIC = [
+    "NVDA", "AMD",          # Tier 1: Core Compute GPUs
+    "AVGO", "MRVL",         # Tier 2: Custom Silicon & ASICs
+    "ANET", "COHR", "LITE", # Tier 3: Networking & Photonics/Optics
+    "MU", "WDC",            # Tier 4: High Bandwidth Memory & Storage
+    "TSM", "ASML", "AMAT",  # Tier 5: Foundries & CapEx Equipment
+    "VRT", "ETN",           # Tier 6: Power, Liquid Cooling, Infrastructure
+    "PLTR", "ARM", "CRWD"   # Tier 7: Data, IP, & Endpoint Security
+]
+
+CRYPTO_THEMATIC = [
+    "IBIT", # Bitcoin Spot Proxy
+    "MSTR", # Corporate Treasury Proxy
+    "COIN", # Exchange/Infrastructure
+    "MARA"  # Miners
 ]
 
 # ==============================================================================
-# 2. KINETIC RADAR PARAMETERS
+# 2. DYNAMIC AGGREGATION (The Lieutenants)
 # ==============================================================================
-# The threshold for price proximity to the 40-Day High (Donchian Channel).
-# A value of -2.0 means the asset must be trading within 2% of its highest 
-# price over the last 40 days to qualify as a valid breakout setup.
-MIN_DONCHIAN_PROX = -2.0 
+# Automatically compiles all unique tickers above into the master radar scan list.
+_all_targets = MACRO_ASSETS + SECTORS + SUBSECTORS + AI_THEMATIC + CRYPTO_THEMATIC
+LIEUTENANTS = list(dict.fromkeys(_all_targets)) # Removes duplicates automatically
 
 # ==============================================================================
-# 3. VOLUME IGNITION THRESHOLDS
+# 3. RADAR PARAMETERS
 # ==============================================================================
-# The minimum institutional footprint required to trigger the radar.
-# A value of 1.5 means today's volume must be at least 150% (1.5x) of the 
-# standard 20-Day Simple Moving Average.
+MIN_DONCHIAN_PROX = -2.0 
 MIN_VOLUME_SPIKE = 1.5

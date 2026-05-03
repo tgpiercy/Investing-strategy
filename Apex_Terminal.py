@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.29 + Multi-Tier Dealer Matrix)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.30 + Multi-Tier Density Matrix)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.29<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.30<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -102,7 +102,7 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
-    """V5.29 Multi-Tier Dealer Matrix Engine"""
+    """V5.30 Multi-Tier Dealer Matrix Engine (Density Upgraded)"""
     results = []
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
@@ -124,9 +124,14 @@ def get_gamma_walls():
             if calls.empty or puts.empty: continue
                 
             c_wall_1 = calls.iloc[0]['strike']
+            c_wall_1_oi = calls.iloc[0]['openInterest']
             c_wall_2 = calls.iloc[1]['strike'] if len(calls) > 1 else c_wall_1
+            c_wall_2_oi = calls.iloc[1]['openInterest'] if len(calls) > 1 else c_wall_1_oi
+            
             p_wall_1 = puts.iloc[0]['strike']
+            p_wall_1_oi = puts.iloc[0]['openInterest']
             p_wall_2 = puts.iloc[1]['strike'] if len(puts) > 1 else p_wall_1
+            p_wall_2_oi = puts.iloc[1]['openInterest'] if len(puts) > 1 else p_wall_1_oi
             
             # Zero-Gamma Proxy Calculation (Max Combined OI)
             merged = pd.merge(chain.calls[['strike', 'openInterest']], 
@@ -136,17 +141,21 @@ def get_gamma_walls():
             zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
 
             # Ensure Tier 1 is always the closest wall, Tier 2 is the furthest for visual logic
-            if c_wall_1 > c_wall_2: c_wall_1, c_wall_2 = c_wall_2, c_wall_1
-            if p_wall_1 < p_wall_2: p_wall_1, p_wall_2 = p_wall_2, p_wall_1
+            if c_wall_1 > c_wall_2: 
+                c_wall_1, c_wall_2 = c_wall_2, c_wall_1
+                c_wall_1_oi, c_wall_2_oi = c_wall_2_oi, c_wall_1_oi
+            if p_wall_1 < p_wall_2: 
+                p_wall_1, p_wall_2 = p_wall_2, p_wall_1
+                p_wall_1_oi, p_wall_2_oi = p_wall_2_oi, p_wall_1_oi
 
             results.append({
                 "Ticker": ticker, 
                 "Price": px, 
                 "Zero Gamma": zero_gamma,
-                "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, 
-                "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, 
-                "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100,
-                "Put Wall 2": p_wall_2, "Dist PW2": ((px - p_wall_2) / px) * 100
+                "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi,
+                "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, "CW2_OI": c_wall_2_oi,
+                "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100, "PW1_OI": p_wall_1_oi,
+                "Put Wall 2": p_wall_2, "Dist PW2": ((px - p_wall_2) / px) * 100, "PW2_OI": p_wall_2_oi
             })
         except: pass
     return results
@@ -576,11 +585,11 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                         <div style='font-size:0.85rem; font-weight:bold;'>{vol_state}</div>
                     </div>
                     <div class='metric-sub' style='margin-top:10px;'>
-                        <div class='data-row'><span>T2 Call (Squeeze): <b style='color:#FFAA00;'>${c2:.2f}</b></span><span>{g['Dist CW2']:+.1f}%</span></div>
-                        <div class='data-row'><span>T1 Call (Ceiling): <b style='color:#FFF;'>${c1:.2f}</b></span><span>{g['Dist CW1']:+.1f}%</span></div>
-                        <div class='data-row' style='background:rgba(255,255,255,0.05); padding:2px 5px;'><span>Zero-Gamma (Flip): <b style='color:#58a6ff;'>${zg:.2f}</b></span><span>{((zg-px)/px)*100:+.1f}%</span></div>
-                        <div class='data-row'><span>T1 Put (Floor): <b style='color:#FFF;'>${p1:.2f}</b></span><span>{g['Dist PW1']:+.1f}%</span></div>
-                        <div class='data-row'><span>T2 Put (Abyss): <b style='color:#FF4444;'>${p2:.2f}</b></span><span>{g['Dist PW2']:+.1f}%</span></div>
+                        <div class='data-row'><span>T2 Call (Squeeze Target): <b style='color:#FFAA00;'>${c2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW2_OI']):,})</span></span><span>{g['Dist CW2']:+.1f}%</span></div>
+                        <div class='data-row'><span>T1 Call (Primary Ceiling): <b style='color:#FFF;'>${c1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW1_OI']):,})</span></span><span>{g['Dist CW1']:+.1f}%</span></div>
+                        <div class='data-row' style='background:rgba(255,255,255,0.05); padding:2px 5px;'><span>Zero-Gamma (Volatility Flip): <b style='color:#58a6ff;'>${zg:.2f}</b></span><span>{((zg-px)/px)*100:+.1f}%</span></div>
+                        <div class='data-row'><span>T1 Put (Primary Floor): <b style='color:#FFF;'>${p1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW1_OI']):,})</span></span><span>{g['Dist PW1']:+.1f}%</span></div>
+                        <div class='data-row'><span>T2 Put (The Abyss): <b style='color:#FF4444;'>${p2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW2_OI']):,})</span></span><span>{g['Dist PW2']:+.1f}%</span></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)

@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.20 + RRG Restored + SLY/RSP)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.21 + Rotation Cache Fix)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -210,16 +210,27 @@ def run_dark_pool_radar():
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
+    """Isolated, sequential download engine to prevent Streamlit cache multi-index crashes."""
     try:
-        df = yf.download([sym1, sym2], period="1y", progress=False)['Close']
-        df = df.dropna()
+        df1 = yf.download(sym1, period="1y", progress=False)
+        if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.droplevel(1)
+        c1 = df1['Close']
+        
+        df2 = yf.download(sym2, period="1y", progress=False)
+        if isinstance(df2.columns, pd.MultiIndex): df2.columns = df2.columns.droplevel(1)
+        c2 = df2['Close']
+        
+        df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
+        
         current_ratio = df['Ratio'].iloc[-1]
         current_sma = df['Ratio_50SMA'].iloc[-1]
         is_favored = current_ratio > current_sma
+        
         return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
-    except Exception as e: return {"status": "offline", "error": str(e)}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
 def run_master_screener():
@@ -266,10 +277,22 @@ def run_rrg_engine(universe="Macro"):
         }
         benchmark = universes[universe]["benchmark"]
         tickers = universes[universe]["tickers"]
-        all_symbols = tickers + [benchmark]
-        df = yf.download(all_symbols, period="6mo", progress=False)
-        closes, volumes = df['Close'].dropna(), df['Volume'].dropna()
+        
+        # Individual safe downloads to avoid YFinance multi-index errors
+        closes = pd.DataFrame()
+        volumes = pd.DataFrame()
+        for t in tickers + [benchmark]:
+            try:
+                d = yf.download(t, period="6mo", progress=False)
+                if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
+                closes[t] = d['Close']
+                volumes[t] = d['Volume']
+            except: pass
+            
+        closes = closes.dropna()
+        volumes = volumes.dropna()
         results = []
+        
         for ticker in tickers:
             if ticker not in closes.columns or benchmark not in closes.columns: continue
             rs = closes[ticker] / closes[benchmark]
@@ -278,10 +301,11 @@ def run_rrg_engine(universe="Macro"):
             rs_ratio, rs_mom, vol_ratio = rs_ratio.dropna(), rs_mom.dropna(), vol_ratio.dropna()
             if not rs_ratio.empty and not rs_mom.empty:
                 current_vol_spike = vol_ratio.iloc[-1]
+                dynamic_size = max(6, min(current_vol_spike * 8, 25))
                 results.append({
                     "Ticker": ticker, "RS_Ratio": rs_ratio.iloc[-1], "RS_Mom": rs_mom.iloc[-1],     
                     "Tail_X": rs_ratio.tail(5).tolist(), "Tail_Y": rs_mom.tail(5).tolist(),
-                    "Bubble_Size": max(6, min(current_vol_spike * 8, 25)), "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
+                    "Bubble_Size": dynamic_size, "Vol_Spike_Text": f"{current_vol_spike:.2f}x Vol"
                 })
         return {"status": "online", "data": results, "benchmark": benchmark}
     except Exception as e: return {"status": "offline", "error": str(e)}
@@ -349,7 +373,7 @@ with st.spinner("Calibrating Volatility Engines..."):
         st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M: {r:.2f})</span></div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 1 (MACRO & DEALER MATRIX)
+# UI RENDERING: MACRO & DEALER MATRIX
 # ==============================================================================
 col1, col2 = st.columns([1, 1], gap="large")
 with col1:
@@ -374,7 +398,7 @@ with col2:
         st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 2 (CREDIT & SKEW)
+# UI RENDERING: CREDIT & SKEW
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
 c_col1, c_col2 = st.columns([1, 1], gap="large")
@@ -391,7 +415,7 @@ with c_col2:
         st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: ROW 3 (RADARS & DARK POOLS/INSIDERS) - RESTORED
+# UI RENDERING: ROW 3 (RADARS & DARK POOLS/INSIDERS)
 # ==============================================================================
 r_col1, r_col2 = st.columns([1, 1], gap="large")
 with r_col1:
@@ -419,13 +443,13 @@ with r_col2:
             st.dataframe(insider_df, width="stretch", height=200)
 
 # ==============================================================================
-# UI RENDERING: ROW 4 (MACRO ROTATION & RRG) - RESTORED & UPGRADED WITH SLY/RSP
+# UI RENDERING: ROW 4 (MACRO ROTATION & RRG) 
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES vs BREADTH)</div>", unsafe_allow_html=True)
 rot_col1, rot_col2 = st.columns([1, 1], gap="large")
 
 with rot_col1:
-    rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (SLY / RSP)"])
+    rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (SLY / SPY)"])
     
     with rot_tabs[0]:
         with st.spinner("Calculating Intermarket See-Saw..."):
@@ -436,16 +460,20 @@ with rot_col1:
                 status_text = "EQUITIES DOMINATING" if eq_favored else "COMMODITIES DOMINATING"
                 st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
                 st.line_chart(spy_dbc['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+            else:
+                st.error(f"SPY/DBC Engine Offline: {spy_dbc.get('error', 'Unknown Error')}")
 
     with rot_tabs[1]:
-        with st.spinner("Calculating Equal Weight Breadth..."):
-            sly_rsp = run_rotation_engine("SLY", "RSP")
-            if sly_rsp['status'] == 'online':
-                sly_favored = sly_rsp['favored']
+        with st.spinner("Calculating Small-Cap Breadth..."):
+            sly_spy = run_rotation_engine("SLY", "SPY")
+            if sly_spy['status'] == 'online':
+                sly_favored = sly_spy['favored']
                 box_color, box_bg = ("#39FF14", "rgba(57, 255, 20, 0.05)") if sly_favored else ("#8b949e", "rgba(139, 148, 158, 0.05)")
                 status_text = "SMALL CAPS LEADING (RISK-ON BREADTH)" if sly_favored else "LARGE CAPS DEFENSIVE (NARROW MARKET)"
                 st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
-                st.line_chart(sly_rsp['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+                st.line_chart(sly_spy['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
+            else:
+                st.error(f"SLY/SPY Engine Offline: {sly_spy.get('error', 'Unknown Error')}")
 
 with rot_col2:
     selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Global Indices"], horizontal=True, label_visibility="collapsed")
@@ -475,6 +503,8 @@ with rot_col2:
             
             fig.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9'), xaxis=dict(title='Relative Strength vs Benchmark', gridcolor='#30363d', zeroline=False), yaxis=dict(title='Momentum', gridcolor='#30363d', zeroline=False), margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=400)
             st.plotly_chart(fig, width="stretch")
+        else:
+            st.error("RRG Engine Offline. Could not fetch universe data.")
 
 # ==============================================================================
 # UI RENDERING: ROW 5 (THE GLOBAL SCREENER)

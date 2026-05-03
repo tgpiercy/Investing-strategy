@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.35 + Authenticated FRED API)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.36 + Cross-Asset Heatmap)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.35<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.36<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -153,14 +153,12 @@ def get_gamma_walls():
 
 @st.cache_data(ttl=86400)
 def get_fomc_data():
-    """V5.35 FIX: Official Authenticated FRED API Pipeline"""
     try:
         if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
             return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
 
         api_key = cfg.FRED_API_KEY
         
-        # 1. Fetch 10Y-2Y Yield Curve via JSON API
         yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
         res_yc = requests.get(yc_url, timeout=10)
         if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
@@ -170,7 +168,6 @@ def get_fomc_data():
         df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
         df_yc = df_yc[['date', 'value']].rename(columns={'value': 'Yield_Curve'}).set_index('date')
 
-        # 2. Fetch Fed Funds Rate via JSON API
         ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
         res_ff = requests.get(ff_url, timeout=10)
         if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
@@ -180,7 +177,6 @@ def get_fomc_data():
         df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
         df_ff = df_ff[['date', 'value']].rename(columns={'value': 'Fed_Funds'}).set_index('date')
 
-        # Merge and clean data
         df = df_yc.join(df_ff, how='inner').dropna()
         df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
         
@@ -191,6 +187,28 @@ def get_fomc_data():
         
     except Exception as e:
         return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
+
+@st.cache_data(ttl=3600)
+def get_cross_asset_matrix():
+    """V5.36 MACRO PHYSICS: 90-Day Rolling Pearson Correlation"""
+    tickers = ["SPY", "QQQ", "TLT", "GLD", "USO", "UUP", "BTC-USD"]
+    try:
+        df = yf.download(tickers, period="3mo", progress=False)['Close']
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
+        df = df.dropna(how='all')
+        
+        # Calculate Daily Returns
+        returns = df.pct_change().dropna()
+        if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
+        
+        # Calculate Correlation and order properly
+        corr_matrix = returns.corr().round(2)
+        valid_tickers = [t for t in tickers if t in corr_matrix.columns]
+        corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
+        
+        return {"status": "online", "data": corr_matrix}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
@@ -637,6 +655,45 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             st.plotly_chart(fig_fomc, width="stretch", key="fomc_chart")
         else:
             st.error(f"FOMC Engine Offline: {fomc.get('error', 'Unknown Error')}")
+
+    # --- V5.36 PEARSON HEATMAP MODULE ---
+    st.markdown("<div class='apex-header' style='margin-top: 40px;'>🌐 GLOBAL LIQUIDITY PHYSICS (CROSS-ASSET PEARSON MATRIX)</div>", unsafe_allow_html=True)
+    with st.spinner("Calculating 90-Day Rolling Cross-Asset Correlations..."):
+        matrix_res = get_cross_asset_matrix()
+        if matrix_res['status'] == 'online':
+            corr_df = matrix_res['data']
+            
+            # Custom dark-theme compatible colorscale
+            custom_colorscale = [
+                [0.0, '#FF4444'],  # Strong Negative (Red)
+                [0.5, '#161b22'],  # Neutral (Dark Background)
+                [1.0, '#39FF14']   # Strong Positive (Neon Green)
+            ]
+            
+            fig_hm = go.Figure(data=go.Heatmap(
+                z=corr_df.values,
+                x=corr_df.columns,
+                y=corr_df.index,
+                colorscale=custom_colorscale,
+                zmin=-1, zmax=1,
+                text=corr_df.values,
+                texttemplate="%{text}",
+                showscale=False,
+                hoverinfo="x+y+z"
+            ))
+            
+            fig_hm.update_layout(
+                plot_bgcolor='#0d1117', 
+                paper_bgcolor='#0d1117', 
+                font=dict(color='#c9d1d9', size=14),
+                margin=dict(l=20, r=20, t=20, b=20),
+                height=450,
+                xaxis=dict(side="bottom", showgrid=False),
+                yaxis=dict(autorange="reversed", showgrid=False)
+            )
+            st.plotly_chart(fig_hm, width="stretch", key="heatmap_chart")
+        else:
+            st.error(f"Pearson Matrix Offline: {matrix_res.get('error', 'Unknown Error')}")
 
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:

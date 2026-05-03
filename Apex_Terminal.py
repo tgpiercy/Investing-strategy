@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.17 + Cache-Stabilized Screener)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.18 + Namespace Stabilized)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -164,7 +164,6 @@ def run_master_screener():
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     
-    # Isolated sequential loop to bypass yfinance's unhashable bulk-download metadata
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="6mo", progress=False)
@@ -174,7 +173,6 @@ def run_master_screener():
             df = df.dropna()
             if len(df) < 50: continue
             
-            # Force conversion to raw Python floats for pristine caching
             c = float(df['Close'].iloc[-1])
             v = float(df['Volume'].iloc[-1])
             
@@ -338,7 +336,7 @@ with st.spinner("Calibrating Volatility Engines..."):
         if r >= 1.0: color, title, sub, b_bg = "#FF4444", "🚨 DEFCON 1: VOLATILITY INVERTED", "Market Makers pricing immediate crash. HALT LONGS.", "rgba(255, 68, 68, 0.1)"
         elif r >= 0.9: color, title, sub, b_bg = "#FFAA00", "⚠️ DEFCON 3: ELEVATED RISK", "Term Structure flattening. Reduce sizing.", "rgba(255, 170, 0, 0.1)"
         else: color, title, sub, b_bg = "#39FF14", "🟢 DEFCON 5: NORMAL CONTANGO", "Institutional fear low. High probability breakouts.", "rgba(57, 255, 20, 0.05)"
-        st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M: {r:.2f})</span></div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M Ratio: {r:.2f})</span></div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
 # UI RENDERING: MACRO & DEALER MATRIX
@@ -358,11 +356,11 @@ with col1:
 with col2:
     st.markdown("<div class='apex-header'>☢️ DEALER MATRIX (GAMMA WALLS)</div>", unsafe_allow_html=True)
     for g in get_gamma_walls():
-        cd, pd = g['Dist to Call'], g['Dist to Put']
-        if cd < 0: cc, mc, m, ct = "card-squeeze", "mandate-buy", "SHORT GAMMA - MAX LONGS", f"<span style='color:#39FF14;'>⚠️ BREACHED</span>"
-        elif pd > 0: cc, mc, m, ct = "card-bearish", "mandate-sell", "LONG GAMMA - RESISTANCE", f"{cd:+.2f}%"
-        else: cc, mc, m, ct = "card-neutral", "mandate-warn", "TRAPPED IN CHOP", f"{cd:+.2f}%"
-        pt = f"<span style='color:#FF4444;'>⚠️ BREACHED</span>" if pd > 0 else f"{pd:+.2f}%"
+        c_dist, p_dist = g['Dist to Call'], g['Dist to Put']
+        if c_dist < 0: cc, mc, m, ct = "card-squeeze", "mandate-buy", "SHORT GAMMA - MAX LONGS", f"<span style='color:#39FF14;'>⚠️ BREACHED</span>"
+        elif p_dist > 0: cc, mc, m, ct = "card-bearish", "mandate-sell", "LONG GAMMA - RESISTANCE", f"{c_dist:+.2f}%"
+        else: cc, mc, m, ct = "card-neutral", "mandate-warn", "TRAPPED IN CHOP", f"{c_dist:+.2f}%"
+        pt = f"<span style='color:#FF4444;'>⚠️ BREACHED</span>" if p_dist > 0 else f"{p_dist:+.2f}%"
         st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
@@ -427,4 +425,20 @@ if last_data:
     d_col3.markdown(f"<div class='tactical-card {'card-bullish' if liq_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>LIQUIDITY (9>50 VOL)</div><div class='price-text' style='color: {'#39FF14' if liq_bull else '#FF4444'};'>{'EXPANDING' if liq_bull else 'CONTRACTING'}</div></div></div>", unsafe_allow_html=True)
     d_col4.markdown(f"<div class='tactical-card {'card-squeeze' if dp_active else 'card-neutral'}' style='min-height: 100px;'><div><div class='metric-sub'>DARK POOL BLOCK</div><div class='price-text' style='color: {'#FFAA00' if dp_active else '#8b949e'};'>{'DETECTED' if dp_active else 'CLEAR'}</div></div></div>", unsafe_allow_html=True)
     
-    st.code(f"[{datetime.now().strftime('%Y-%m-%d')}] {target_chart} @ ${c:.2f} | T: {'BULL' if trend_bull else 'BEAR'} | M: {'IGNITED' if mom_bull else 'LAGGING'} | L: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} | STRUC RSK: {abs(struct_pct):.2f}% | TACT RSK: {tact_pct:.2f}%", language="text")
+    st.markdown(f"""
+    <div style='background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px; margin-top: 20px;'>
+        <b style='color: #58a6ff;'>RISK DRAWDOWN MATRIX</b><br><br>
+        <div style='display: flex; justify-content: space-between; border-bottom: 1px dashed rgba(139, 148, 158, 0.2); padding-bottom: 10px; margin-bottom: 10px;'>
+            <span style='color: #8b949e;'>Structural Risk (To 50 SMA):</span>
+            <span style='color: #FFF; font-weight: bold;'>Stop: ${last_data['SMA_50']:.2f} | Risk: -${abs(struct_dist):.2f} / Share ({abs(struct_pct):.2f}%)</span>
+        </div>
+        <div style='display: flex; justify-content: space-between;'>
+            <span style='color: #8b949e;'>Tactical Risk (2x ATR Trailing):</span>
+            <span style='color: #FFF; font-weight: bold;'>Stop: ${tact_stop_price:.2f} | Risk: -${tact_dist:.2f} / Share ({tact_pct:.2f}%)</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | TREND: {'BULL' if trend_bull else 'BEAR'} | MOMENTUM: {'IGNITED' if mom_bull else 'LAGGING'} | LIQ: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} || RISK -> STRUC: {abs(struct_pct):.2f}%, TACT: {tact_pct:.2f}%"
+    st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
+    st.code(journal_str, language="text")

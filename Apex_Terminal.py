@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.16 + Stabilized Screener)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.17 + Cache-Stabilized Screener)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -163,70 +163,60 @@ def get_insider_signals():
 def run_master_screener():
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
-    try:
-        # Standardized download (no group_by) to prevent Streamlit cache multi-index failures
-        data = yf.download(tickers, period="6mo", progress=False)
-        for ticker in tickers:
-            try:
-                # Isolate the data per ticker safely
-                if len(tickers) == 1:
-                    df = data.copy()
-                    if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = df.columns.droplevel(1)
-                else:
-                    df = pd.DataFrame({
-                        'Close': data['Close'][ticker],
-                        'High': data['High'][ticker],
-                        'Low': data['Low'][ticker],
-                        'Volume': data['Volume'][ticker]
-                    })
-                
-                df = df.dropna()
-                if len(df) < 50: continue
-                
-                # Force standard Python float typing to ensure Streamlit cache compatibility
-                c = float(df['Close'].iloc[-1])
-                v = float(df['Volume'].iloc[-1])
-                
-                sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
-                ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
-                ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
-                
-                vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
-                vol_sma_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-                vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
-                
-                atr_20 = float((df['High'] - df['Low']).rolling(20).mean().iloc[-1])
-                rng = float(df['High'].iloc[-1] - df['Low'].iloc[-1])
-                
-                # Logic Gates
-                trend = c > sma_50
-                mom = ema_9 > ema_21
-                liq = vol_sma_9 > vol_sma_50
-                dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
-                dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
-                
-                # Scoring
-                score = sum([trend, mom, liq, dp_vol, dp_comp])
-                
-                # Categorization
-                if score == 5: cat = "🔥 TIER 1: PERFECT SETUP"
-                elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH ACCUMULATION"
-                elif mom and liq: cat = "🚀 KINETIC BREAKOUT"
-                else: cat = "STANDBY"
-                
-                if cat != "STANDBY":
-                    results.append({
-                        "Ticker": ticker, 
-                        "Price": f"${c:.2f}", 
-                        "Titan Score": f"{score}/5",
-                        "Category": cat, 
-                        "Volume": f"{v/vol_sma_20:.1f}x", 
-                        "Compression": f"{rng/atr_20:.2f}x"
-                    })
-            except Exception as e: pass
-    except Exception as e: pass
     
+    # Isolated sequential loop to bypass yfinance's unhashable bulk-download metadata
+    for ticker in tickers:
+        try:
+            df = yf.download(ticker, period="6mo", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): 
+                df.columns = df.columns.droplevel(1)
+            
+            df = df.dropna()
+            if len(df) < 50: continue
+            
+            # Force conversion to raw Python floats for pristine caching
+            c = float(df['Close'].iloc[-1])
+            v = float(df['Volume'].iloc[-1])
+            
+            sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
+            ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
+            ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
+            
+            vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
+            vol_sma_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
+            vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
+            
+            atr_20 = float((df['High'] - df['Low']).rolling(20).mean().iloc[-1])
+            rng = float(df['High'].iloc[-1] - df['Low'].iloc[-1])
+            
+            # Logic Gates
+            trend = c > sma_50
+            mom = ema_9 > ema_21
+            liq = vol_sma_9 > vol_sma_50
+            dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
+            dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
+            
+            # Scoring Matrix
+            score = sum([trend, mom, liq, dp_vol, dp_comp])
+            
+            # Categorization
+            if score == 5: cat = "🔥 TIER 1: PERFECT SETUP"
+            elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH ACCUMULATION"
+            elif mom and liq: cat = "🚀 KINETIC BREAKOUT"
+            else: cat = "STANDBY"
+            
+            if cat != "STANDBY":
+                results.append({
+                    "Ticker": ticker, 
+                    "Price": f"${c:.2f}", 
+                    "Titan Score": f"{score}/5",
+                    "Category": cat, 
+                    "Volume": f"{v/vol_sma_20:.1f}x", 
+                    "Compression": f"{rng/atr_20:.2f}x"
+                })
+        except Exception:
+            pass
+            
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
@@ -399,7 +389,7 @@ st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTE
 st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized scan of the entire configuration universe for algorithmic setup confirmation.</p>", unsafe_allow_html=True)
 
 if st.button("EXECUTE GLOBAL SCAN"):
-    with st.spinner("Compiling cross-asset vector data..."):
+    with st.spinner("Compiling cross-asset vector data (Bypassing bulk-API limits)..."):
         screen_df = run_master_screener()
         if not screen_df.empty:
             st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), use_container_width=True, hide_index=True)

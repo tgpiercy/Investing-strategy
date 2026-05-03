@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.24 + Hybrid API Protocol)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.25 + Dynamic Config Ingest)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -174,7 +174,8 @@ def get_options_skew(ticker="SPY"):
 @st.cache_data(ttl=86400)
 def get_insider_signals():
     results = []
-    scan_list = ["NVDA", "AMD", "PLTR", "SMCI", "TSLA", "COIN", "MSTR", "XOM"]
+    # Dynamic scan of top setups instead of hardcoded to prevent API block
+    scan_list = list(dict.fromkeys(cfg.AI_THEMATIC[:5] + cfg.CRYPTO_THEMATIC[:3])) 
     for ticker in scan_list:
         try:
             tk = yf.Ticker(ticker)
@@ -269,7 +270,7 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
 @st.cache_data(ttl=900)
 def run_master_screener():
     results = []
-    tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
+    tickers = cfg.LIEUTENANTS
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="6mo", progress=False)
@@ -300,17 +301,18 @@ def run_master_screener():
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
-def run_rrg_engine(universe="Macro"):
+def run_rrg_engine(universe_key="Macro"):
     try:
+        # Dynamic pull from the new centralized config
         universes = {
-            "Macro (Assets)": {"benchmark": "SPY", "tickers": ["QQQ", "IWM", "USO", "GLD", "COPX", "TLT"]},
-            "Sectors (S&P 500)": {"benchmark": "SPY", "tickers": ["XLK", "XLF", "XLV", "XLE", "XLY", "XLI", "XLP", "XLU", "XLB", "XLRE"]},
-            "Subsectors (Industry)": {"benchmark": "SPY", "tickers": ["XSD", "KRE", "ITB", "XOP", "XRT", "XBI", "JETS", "OIH"]},
-            "AI & Tech Infra": {"benchmark": "SPY", "tickers": ["NVDA", "AMD", "AVGO", "SMCI", "ANET", "VRT", "PLTR", "TSM", "ARM"]},
-            "Global Indices": {"benchmark": "SPY", "tickers": ["EFA", "EEM", "QQQ", "DIA", "IWM"]}
+            "Macro (Assets)": {"benchmark": "SPY", "tickers": cfg.MACRO_ASSETS},
+            "Sectors (S&P 500)": {"benchmark": "SPY", "tickers": cfg.SECTORS},
+            "Subsectors (Industry)": {"benchmark": "SPY", "tickers": cfg.SUBSECTORS},
+            "AI & Tech Infra": {"benchmark": "SPY", "tickers": cfg.AI_THEMATIC},
+            "Crypto Proxy": {"benchmark": "SPY", "tickers": cfg.CRYPTO_THEMATIC}
         }
-        benchmark = universes[universe]["benchmark"]
-        tickers = universes[universe]["tickers"]
+        benchmark = universes[universe_key]["benchmark"]
+        tickers = universes[universe_key]["tickers"]
         
         closes = pd.DataFrame()
         volumes = pd.DataFrame()
@@ -432,13 +434,14 @@ with col1:
 
 with col2:
     st.markdown("<div class='apex-header'>☢️ DEALER MATRIX (GAMMA WALLS)</div>", unsafe_allow_html=True)
-    for g in get_gamma_walls():
-        c_dist, p_dist = g['Dist to Call'], g['Dist to Put']
-        if c_dist < 0: cc, mc, m, ct = "card-squeeze", "mandate-buy", "SHORT GAMMA - MAX LONGS", f"<span style='color:#39FF14;'>⚠️ BREACHED</span>"
-        elif p_dist > 0: cc, mc, m, ct = "card-bearish", "mandate-sell", "LONG GAMMA - RESISTANCE", f"{c_dist:+.2f}%"
-        else: cc, mc, m, ct = "card-neutral", "mandate-warn", "TRAPPED IN CHOP", f"{c_dist:+.2f}%"
-        pt = f"<span style='color:#FF4444;'>⚠️ BREACHED</span>" if p_dist > 0 else f"{p_dist:+.2f}%"
-        st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
+    with st.spinner("Scanning Indices..."):
+        for g in get_gamma_walls():
+            c_dist, p_dist = g['Dist to Call'], g['Dist to Put']
+            if c_dist < 0: cc, mc, m, ct = "card-squeeze", "mandate-buy", "SHORT GAMMA - MAX LONGS", f"<span style='color:#39FF14;'>⚠️ BREACHED</span>"
+            elif p_dist > 0: cc, mc, m, ct = "card-bearish", "mandate-sell", "LONG GAMMA - RESISTANCE", f"{c_dist:+.2f}%"
+            else: cc, mc, m, ct = "card-neutral", "mandate-warn", "TRAPPED IN CHOP", f"{c_dist:+.2f}%"
+            pt = f"<span style='color:#FF4444;'>⚠️ BREACHED</span>" if p_dist > 0 else f"{p_dist:+.2f}%"
+            st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
 # UI RENDERING: ROW 2 (CREDIT & SKEW)
@@ -446,18 +449,20 @@ with col2:
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
 c_col1, c_col2 = st.columns([1, 1], gap="large")
 with c_col1:
-    credit = run_credit_stress_engine()
-    if credit['status'] == 'online':
-        cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
-        st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
-    else: st.error(f"Credit Engine Offline: {credit.get('error', 'Unknown')}")
+    with st.spinner("Pulling High Yield Spreads..."):
+        credit = run_credit_stress_engine()
+        if credit['status'] == 'online':
+            cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
+            st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
+        else: st.error(f"Credit Engine Offline: {credit.get('error', 'Unknown')}")
 with c_col2:
-    skew = get_options_skew()
-    if skew['status'] == 'online':
-        is_fear = skew['skew'] > 5.0 or skew['pcr'] > 1.5
-        sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
-        st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
-    else: st.error(f"Options Flow Engine Offline: {skew.get('error', 'Unknown')}")
+    with st.spinner("Parsing Option Volatility Skew..."):
+        skew = get_options_skew()
+        if skew['status'] == 'online':
+            is_fear = skew['skew'] > 5.0 or skew['pcr'] > 1.5
+            sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
+            st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
+        else: st.error(f"Options Flow Engine Offline: {skew.get('error', 'Unknown')}")
 
 # ==============================================================================
 # UI RENDERING: ROW 3 (RADARS & DARK POOLS/INSIDERS)
@@ -521,8 +526,8 @@ with rot_col1:
                 st.error(f"SLY/SPY Engine Offline: {sly_spy.get('error', 'Unknown Error')}")
 
 with rot_col2:
-    selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Global Indices"], horizontal=True, label_visibility="collapsed")
-    with st.spinner(f"Mapping {selected_universe}..."):
+    selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Crypto Proxy"], horizontal=True, label_visibility="collapsed")
+    with st.spinner(f"Mapping {selected_universe} via Config Settings..."):
         rrg_engine = run_rrg_engine(selected_universe)
         if rrg_engine['status'] == 'online':
             fig = go.Figure()
@@ -555,10 +560,10 @@ with rot_col2:
 # UI RENDERING: ROW 5 (THE GLOBAL SCREENER)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTER SCREENER (ALL LIEUTENANTS)</div>", unsafe_allow_html=True)
-st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized scan of the entire configuration universe for algorithmic setup confirmation.</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized scan of the dynamic configuration universe.</p>", unsafe_allow_html=True)
 
 if st.button("EXECUTE GLOBAL SCAN"):
-    with st.spinner("Compiling cross-asset vector data (Bypassing bulk-API limits)..."):
+    with st.spinner("Compiling cross-asset vector data..."):
         screen_df = run_master_screener()
         if not screen_df.empty:
             st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), width="stretch", hide_index=True)
@@ -570,19 +575,21 @@ if st.button("EXECUTE GLOBAL SCAN"):
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RECON & DECODER</div>", unsafe_allow_html=True)
 recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
+
 with recon_col1:
     target_category = st.selectbox("Category Lens:", ["Lieutenants (Watchlist)", "Indices", "Sectors (Macro)", "Subsectors (Micro)", "Thematic (AI/Crypto)"])
-    if target_category == "Indices": active_list = ["SPY", "QQQ", "IWM", "DIA", "EFA", "EEM"]
-    elif target_category == "Sectors (Macro)": active_list = ["XLK", "XLF", "XLV", "XLE", "XLY", "XLI", "XLP", "XLU", "XLB", "XLRE"]
-    elif target_category == "Subsectors (Micro)": active_list = ["XSD", "KRE", "ITB", "XOP", "XRT", "XBI", "JETS", "OIH"]
-    elif target_category == "Thematic (AI/Crypto)": active_list = ["NVDA", "AMD", "SMCI", "ANET", "VRT", "PLTR", "TSM", "MSTR", "COIN", "MARA"]
-    else: active_list = list(dict.fromkeys(cfg.LIEUTENANTS))
+    if target_category == "Indices": active_list = cfg.MACRO_ASSETS
+    elif target_category == "Sectors (Macro)": active_list = cfg.SECTORS
+    elif target_category == "Subsectors (Micro)": active_list = cfg.SUBSECTORS
+    elif target_category == "Thematic (AI/Crypto)": active_list = cfg.AI_THEMATIC + cfg.CRYPTO_THEMATIC
+    else: active_list = cfg.LIEUTENANTS
     target_chart = st.selectbox("Select Target:", active_list)
 
 with recon_col2:
     with st.spinner(f"Loading {target_chart}..."):
         chart_fig, last_data = run_tactical_chart(target_chart)
         if chart_fig: st.plotly_chart(chart_fig, width="stretch")
+        else: st.error("Chart Engine Offline. YFinance API Blocked.")
 
 if last_data:
     c = last_data['Close']

@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.30 + Multi-Tier Density Matrix)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.31 + Institutional Divergence Charts)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.30<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.31<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -102,7 +102,6 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
-    """V5.30 Multi-Tier Dealer Matrix Engine (Density Upgraded)"""
     results = []
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
@@ -117,10 +116,8 @@ def get_gamma_walls():
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
             
-            # Sort for Top 2 Strikes by OI
             calls = chain.calls.sort_values(by='openInterest', ascending=False)
             puts = chain.puts.sort_values(by='openInterest', ascending=False)
-            
             if calls.empty or puts.empty: continue
                 
             c_wall_1 = calls.iloc[0]['strike']
@@ -133,14 +130,10 @@ def get_gamma_walls():
             p_wall_2 = puts.iloc[1]['strike'] if len(puts) > 1 else p_wall_1
             p_wall_2_oi = puts.iloc[1]['openInterest'] if len(puts) > 1 else p_wall_1_oi
             
-            # Zero-Gamma Proxy Calculation (Max Combined OI)
-            merged = pd.merge(chain.calls[['strike', 'openInterest']], 
-                              chain.puts[['strike', 'openInterest']], 
-                              on='strike', how='outer').fillna(0)
+            merged = pd.merge(chain.calls[['strike', 'openInterest']], chain.puts[['strike', 'openInterest']], on='strike', how='outer').fillna(0)
             merged['total_oi'] = merged['openInterest_x'] + merged['openInterest_y']
             zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
 
-            # Ensure Tier 1 is always the closest wall, Tier 2 is the furthest for visual logic
             if c_wall_1 > c_wall_2: 
                 c_wall_1, c_wall_2 = c_wall_2, c_wall_1
                 c_wall_1_oi, c_wall_2_oi = c_wall_2_oi, c_wall_1_oi
@@ -149,9 +142,7 @@ def get_gamma_walls():
                 p_wall_1_oi, p_wall_2_oi = p_wall_2_oi, p_wall_1_oi
 
             results.append({
-                "Ticker": ticker, 
-                "Price": px, 
-                "Zero Gamma": zero_gamma,
+                "Ticker": ticker, "Price": px, "Zero Gamma": zero_gamma,
                 "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi,
                 "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, "CW2_OI": c_wall_2_oi,
                 "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100, "PW1_OI": p_wall_1_oi,
@@ -186,7 +177,13 @@ def run_credit_stress_engine():
         spy_bullish = float(df['SPY'].iloc[-1]) > float(df['SPY'].rolling(20).mean().iloc[-1])
         credit_bearish = float(df['Credit_Ratio'].iloc[-1]) < float(df['Ratio_20SMA'].iloc[-1])
         divergence = spy_bullish and credit_bearish
-        return {"status": "online", "divergence": divergence, "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1])}
+        
+        # V5.31 UPDATE: Return full history array for plotting
+        return {
+            "status": "online", "divergence": divergence, 
+            "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1]),
+            "history": df[['SPY', 'Credit_Ratio', 'Ratio_20SMA']].tail(120)
+        }
     except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
@@ -211,6 +208,22 @@ def get_options_skew(ticker="SPY"):
         skew = (p_iv - c_iv) * 100 
         return {"status": "online", "pcr": pcr, "put_iv": p_iv, "call_iv": c_iv, "skew": skew}
     except Exception as e: return {"status": "offline", "error": str(e)}
+
+@st.cache_data(ttl=3600)
+def get_options_flow_chart_data(live_pcr, ticker="SPY"):
+    """V5.31 UPDATE: Synthetic Proxy to visualize historical options flow anchoring to live PCR snapshot"""
+    try:
+        df = yf.download([ticker, "^VIX"], period="6mo", progress=False)['Close'].dropna()
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+        if df.empty: return None
+        vix = df['^VIX']
+        vix_norm = (vix - vix.min()) / (vix.max() - vix.min())
+        sim_pcr = 0.6 + (vix_norm * 1.0)
+        offset = live_pcr - float(sim_pcr.iloc[-1])
+        df['PCR_Proxy'] = sim_pcr + offset
+        return df.tail(120)
+    except Exception:
+        return None
 
 @st.cache_data(ttl=86400)
 def get_insider_signals():
@@ -596,21 +609,47 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
     c_col1, c_col2 = st.columns([1, 1], gap="large")
+    
+    credit_data = None
+    skew_data = None
+    
     with c_col1:
-        with st.spinner("Pulling High Yield Spreads..."):
-            credit = run_credit_stress_engine()
-            if credit['status'] == 'online':
-                cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
-                st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
-            else: st.error(f"Credit Engine Offline: {credit.get('error', 'Unknown')}")
+        with st.spinner("Pulling High Yield Spreads & Rendering Divergence Chart..."):
+            credit_data = run_credit_stress_engine()
+            if credit_data['status'] == 'online':
+                cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit_data['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
+                st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit_data['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit_data['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit_data['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
+                
+                # --- V5.31 CREDIT CHART ---
+                df_c = credit_data['history']
+                fig_c = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_c.add_trace(go.Scatter(x=df_c.index, y=df_c['SPY'], name="SPY Price", line=dict(color='#58a6ff', width=2)), secondary_y=False)
+                fig_c.add_trace(go.Scatter(x=df_c.index, y=df_c['Credit_Ratio'], name="HYG/IEF Ratio", line=dict(color='#FF4444' if credit_data['divergence'] else '#39FF14', width=2)), secondary_y=True)
+                fig_c.update_layout(plot_bgcolor='#161b22', paper_bgcolor='#161b22', font=dict(color='#c9d1d9'), margin=dict(l=10, r=10, t=10, b=10), height=280, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+                fig_c.update_yaxes(showgrid=False, zeroline=False)
+                fig_c.update_xaxes(showgrid=False, zeroline=False)
+                st.plotly_chart(fig_c, width="stretch", key="credit_chart")
+            else: st.error(f"Credit Engine Offline: {credit_data.get('error', 'Unknown')}")
+            
     with c_col2:
-        with st.spinner("Parsing Option Volatility Skew..."):
-            skew = get_options_skew()
-            if skew['status'] == 'online':
-                is_fear = skew['skew'] > 5.0 or skew['pcr'] > 1.5
+        with st.spinner("Parsing Option Volatility Skew & Rendering Divergence Chart..."):
+            skew_data = get_options_skew()
+            if skew_data['status'] == 'online':
+                is_fear = skew_data['skew'] > 5.0 or skew_data['pcr'] > 1.5
                 sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
-                st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
-            else: st.error(f"Options Flow Engine Offline: {skew.get('error', 'Unknown')}")
+                st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew_data['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew_data['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
+                
+                # --- V5.31 OPTIONS FLOW CHART ---
+                df_o = get_options_flow_chart_data(skew_data['pcr'])
+                if df_o is not None:
+                    fig_o = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_o.add_trace(go.Scatter(x=df_o.index, y=df_o['SPY'], name="SPY Price", line=dict(color='#58a6ff', width=2)), secondary_y=False)
+                    fig_o.add_trace(go.Scatter(x=df_o.index, y=df_o['PCR_Proxy'], name="Put/Call Ratio (Synthetic Proxy)", line=dict(color='#FF4444' if is_fear else '#FFAA00', width=2)), secondary_y=True)
+                    fig_o.update_layout(plot_bgcolor='#161b22', paper_bgcolor='#161b22', font=dict(color='#c9d1d9'), margin=dict(l=10, r=10, t=10, b=10), height=280, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+                    fig_o.update_yaxes(showgrid=False, zeroline=False)
+                    fig_o.update_xaxes(showgrid=False, zeroline=False)
+                    st.plotly_chart(fig_o, width="stretch", key="options_chart")
+            else: st.error(f"Options Flow Engine Offline: {skew_data.get('error', 'Unknown')}")
 
     r_col1, r_col2 = st.columns([1, 1], gap="large")
     with r_col1:

@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.34 + FRED Timeout Patch)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.35 + Authenticated FRED API)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.34<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.35<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -153,31 +153,44 @@ def get_gamma_walls():
 
 @st.cache_data(ttl=86400)
 def get_fomc_data():
-    """V5.34 FIX: Extended Timeout for FRED API"""
+    """V5.35 FIX: Official Authenticated FRED API Pipeline"""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        timeout_limit = 30  # Increased to 30 seconds
+        if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
+            return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
+
+        api_key = cfg.FRED_API_KEY
         
-        res_yc = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y", headers=headers, timeout=timeout_limit)
-        if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED Blocked T10Y2Y (Status: {res_yc.status_code})"}
-        df_yc = pd.read_csv(io.StringIO(res_yc.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
+        # 1. Fetch 10Y-2Y Yield Curve via JSON API
+        yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
+        res_yc = requests.get(yc_url, timeout=10)
+        if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
         
-        res_ff = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF", headers=headers, timeout=timeout_limit)
-        if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED Blocked DFF (Status: {res_ff.status_code})"}
-        df_ff = pd.read_csv(io.StringIO(res_ff.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
+        df_yc = pd.DataFrame(res_yc.json()['observations'])
+        df_yc['date'] = pd.to_datetime(df_yc['date'])
+        df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
+        df_yc = df_yc[['date', 'value']].rename(columns={'value': 'Yield_Curve'}).set_index('date')
+
+        # 2. Fetch Fed Funds Rate via JSON API
+        ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
+        res_ff = requests.get(ff_url, timeout=10)
+        if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
         
+        df_ff = pd.DataFrame(res_ff.json()['observations'])
+        df_ff['date'] = pd.to_datetime(df_ff['date'])
+        df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
+        df_ff = df_ff[['date', 'value']].rename(columns={'value': 'Fed_Funds'}).set_index('date')
+
+        # Merge and clean data
         df = df_yc.join(df_ff, how='inner').dropna()
-        df.columns = ['Yield_Curve', 'Fed_Funds']
         df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
         
         if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
         
         status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
         return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
-    except requests.exceptions.Timeout:
-        return {"status": "offline", "error": "FRED API Connection Timed Out (>30s). Institutional Server Sluggish."}
+        
     except Exception as e:
-        return {"status": "offline", "error": str(e)}
+        return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
 
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
@@ -587,7 +600,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
-    # --- V5.34 FOMC LIQUIDITY MODULE ---
+    # --- V5.35 FOMC LIQUIDITY MODULE ---
     st.markdown("<div class='apex-header' style='margin-top: 20px;'>🏛️ FOMC LIQUIDITY & YIELD CURVE (MACRO PLUMBING)</div>", unsafe_allow_html=True)
     with st.spinner("Fetching FRED Macro Data..."):
         fomc = get_fomc_data()

@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.21 + Rotation Cache Fix)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.22 + Empty Data Armor)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -52,12 +52,15 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# DATA ENGINES
+# DATA ENGINES (WITH WEEKEND/EMPTY ARMOR)
 # ==============================================================================
 @st.cache_data(ttl=300)
 def get_risk_engine():
     try:
-        data = yf.download(["^VIX", "^VIX3M"], period="1d", progress=False)['Close']
+        # Changed 1d to 5d to guarantee weekend data pull
+        data = yf.download(["^VIX", "^VIX3M"], period="5d", progress=False)['Close']
+        data = data.dropna()
+        if data.empty: return {"status": "offline", "error": "API returned empty dataset"}
         vix = data['^VIX'].iloc[-1]
         vix3m = data['^VIX3M'].iloc[-1]
         return {"vix": vix, "vix3m": vix3m, "ratio": vix / vix3m, "status": "online"}
@@ -98,7 +101,10 @@ def get_gamma_walls():
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
             tk = yf.Ticker(ticker)
-            px = tk.history(period="1d")['Close'].iloc[-1]
+            # 5d pull for weekend protection
+            hist = tk.history(period="5d")
+            if hist.empty: continue
+            px = hist['Close'].iloc[-1]
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
@@ -117,6 +123,7 @@ def run_credit_stress_engine():
     try:
         df = yf.download(["HYG", "IEF", "SPY"], period="6mo", progress=False)['Close']
         df = df.dropna()
+        if df.empty: return {"status": "offline", "error": "Insufficient data overlay"}
         df['Credit_Ratio'] = df['HYG'] / df['IEF']
         df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
         spy_bullish = df['SPY'].iloc[-1] > df['SPY'].rolling(20).mean().iloc[-1]
@@ -129,7 +136,10 @@ def run_credit_stress_engine():
 def get_options_skew(ticker="SPY"):
     try:
         tk = yf.Ticker(ticker)
-        px = tk.history(period="1d")['Close'].iloc[-1]
+        # 5d pull for weekend protection
+        hist = tk.history(period="5d")
+        if hist.empty: return {"status": "offline", "error": "No price data"}
+        px = hist['Close'].iloc[-1]
         exps = tk.options
         if not exps: return {"status": "offline"}
         chain = tk.option_chain(exps[min(1, len(exps)-1)])
@@ -166,8 +176,8 @@ def run_kinetic_radar():
         try:
             df = yf.download(ticker, period="3mo", progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            if df.empty or len(df) < 40: continue
             df = df.dropna()
+            if df.empty or len(df) < 40: continue
             
             high = df['High'].rolling(40).max().iloc[-1]
             close = df['Close'].iloc[-1]
@@ -189,8 +199,8 @@ def run_dark_pool_radar():
         try:
             df = yf.download(ticker, period="2mo", progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            if df.empty or len(df) < 20: continue
             df = df.dropna()
+            if df.empty or len(df) < 20: continue
             
             close = df['Close'].iloc[-1]
             vol = df['Volume'].iloc[-1]
@@ -210,17 +220,20 @@ def run_dark_pool_radar():
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
-    """Isolated, sequential download engine to prevent Streamlit cache multi-index crashes."""
     try:
         df1 = yf.download(sym1, period="1y", progress=False)
         if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.droplevel(1)
+        if df1.empty: return {"status": "offline", "error": f"Failed to fetch {sym1}"}
         c1 = df1['Close']
         
         df2 = yf.download(sym2, period="1y", progress=False)
         if isinstance(df2.columns, pd.MultiIndex): df2.columns = df2.columns.droplevel(1)
+        if df2.empty: return {"status": "offline", "error": f"Failed to fetch {sym2}"}
         c2 = df2['Close']
         
         df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
+        if df.empty: return {"status": "offline", "error": "Insufficient data overlap"}
+        
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
         
@@ -229,8 +242,7 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
         is_favored = current_ratio > current_sma
         
         return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
+    except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
 def run_master_screener():
@@ -241,7 +253,7 @@ def run_master_screener():
             df = yf.download(ticker, period="6mo", progress=False)
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna()
-            if len(df) < 50: continue
+            if df.empty or len(df) < 50: continue
             
             c, v = float(df['Close'].iloc[-1]), float(df['Volume'].iloc[-1])
             sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
@@ -278,23 +290,24 @@ def run_rrg_engine(universe="Macro"):
         benchmark = universes[universe]["benchmark"]
         tickers = universes[universe]["tickers"]
         
-        # Individual safe downloads to avoid YFinance multi-index errors
         closes = pd.DataFrame()
         volumes = pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
                 d = yf.download(t, period="6mo", progress=False)
                 if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
-                closes[t] = d['Close']
-                volumes[t] = d['Volume']
+                if not d.empty:
+                    closes[t] = d['Close']
+                    volumes[t] = d['Volume']
             except: pass
             
         closes = closes.dropna()
         volumes = volumes.dropna()
-        results = []
+        if closes.empty or benchmark not in closes.columns: return {"status": "offline", "error": "Insufficient RRG Universe Data"}
         
+        results = []
         for ticker in tickers:
-            if ticker not in closes.columns or benchmark not in closes.columns: continue
+            if ticker not in closes.columns: continue
             rs = closes[ticker] / closes[benchmark]
             rs_ratio, rs_mom = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100, ((rs.rolling(10).mean() / rs.rolling(40).mean()) * 100 / (rs.rolling(10).mean() / rs.rolling(40).mean() * 100).rolling(10).mean()) * 100
             vol_ratio = volumes[ticker] / volumes[ticker].rolling(20).mean()
@@ -316,6 +329,7 @@ def run_tactical_chart(ticker):
         df = yf.download(ticker, period="1y", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna()
+        if df.empty or len(df) < 50: return None, None
 
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
@@ -371,9 +385,11 @@ with st.spinner("Calibrating Volatility Engines..."):
         elif r >= 0.9: color, title, sub, b_bg = "#FFAA00", "⚠️ DEFCON 3: ELEVATED RISK", "Term Structure flattening. Reduce sizing.", "rgba(255, 170, 0, 0.1)"
         else: color, title, sub, b_bg = "#39FF14", "🟢 DEFCON 5: NORMAL CONTANGO", "Institutional fear low. High probability breakouts.", "rgba(57, 255, 20, 0.05)"
         st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M: {r:.2f})</span></div></div>", unsafe_allow_html=True)
+    else:
+        st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
 # ==============================================================================
-# UI RENDERING: MACRO & DEALER MATRIX
+# UI RENDERING: ROW 1 (MACRO & DEALER MATRIX)
 # ==============================================================================
 col1, col2 = st.columns([1, 1], gap="large")
 with col1:
@@ -398,7 +414,7 @@ with col2:
         st.markdown(f"<div class='tactical-card {cc}'><div><div style='display:flex; justify-content:space-between;'><div class='asset-title'>{g['Ticker']}</div><div class='price-text'>${g['Price']:.2f}</div></div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>CALL WALL: <b style='color:#FFF;'>${g['Call Wall']:.2f}</b></span><span>[{ct}]</span></div><div class='data-row'><span>PUT FLOOR: <b style='color:#FFF;'>${g['Put Wall']:.2f}</b></span><span>[{pt}]</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
-# UI RENDERING: CREDIT & SKEW
+# UI RENDERING: ROW 2 (CREDIT & SKEW)
 # ==============================================================================
 st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
 c_col1, c_col2 = st.columns([1, 1], gap="large")
@@ -407,12 +423,14 @@ with c_col1:
     if credit['status'] == 'online':
         cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
         st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
+    else: st.error(f"Credit Engine Offline: {credit.get('error', 'Unknown')}")
 with c_col2:
     skew = get_options_skew()
     if skew['status'] == 'online':
         is_fear = skew['skew'] > 5.0 or skew['pcr'] > 1.5
         sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
         st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
+    else: st.error(f"Options Flow Engine Offline: {skew.get('error', 'Unknown')}")
 
 # ==============================================================================
 # UI RENDERING: ROW 3 (RADARS & DARK POOLS/INSIDERS)

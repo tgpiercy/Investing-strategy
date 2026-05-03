@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.22 + Empty Data Armor)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.23 + Ticker.History API Pivot)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -52,12 +52,11 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# DATA ENGINES (WITH WEEKEND/EMPTY ARMOR)
+# DATA ENGINES (WITH .HISTORY() API PIVOT & WEEKEND ARMOR)
 # ==============================================================================
 @st.cache_data(ttl=300)
 def get_risk_engine():
     try:
-        # Changed 1d to 5d to guarantee weekend data pull
         data = yf.download(["^VIX", "^VIX3M"], period="5d", progress=False)['Close']
         data = data.dropna()
         if data.empty: return {"status": "offline", "error": "API returned empty dataset"}
@@ -101,7 +100,6 @@ def get_gamma_walls():
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
             tk = yf.Ticker(ticker)
-            # 5d pull for weekend protection
             hist = tk.history(period="5d")
             if hist.empty: continue
             px = hist['Close'].iloc[-1]
@@ -121,9 +119,20 @@ def get_gamma_walls():
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
     try:
-        df = yf.download(["HYG", "IEF", "SPY"], period="6mo", progress=False)['Close']
-        df = df.dropna()
-        if df.empty: return {"status": "offline", "error": "Insufficient data overlay"}
+        # Re-routed through individual Ticker().history() for ultimate stability
+        tk_hyg, tk_ief, tk_spy = yf.Ticker("HYG"), yf.Ticker("IEF"), yf.Ticker("SPY")
+        h_hyg, h_ief, h_spy = tk_hyg.history(period="6mo"), tk_ief.history(period="6mo"), tk_spy.history(period="6mo")
+        
+        if h_hyg.empty or h_ief.empty or h_spy.empty: return {"status": "offline", "error": "Insufficient data overlay"}
+        
+        c_hyg, c_ief, c_spy = h_hyg['Close'], h_ief['Close'], h_spy['Close']
+        if c_hyg.index.tz is not None: c_hyg.index = c_hyg.index.tz_localize(None)
+        if c_ief.index.tz is not None: c_ief.index = c_ief.index.tz_localize(None)
+        if c_spy.index.tz is not None: c_spy.index = c_spy.index.tz_localize(None)
+        
+        df = pd.concat([c_hyg, c_ief, c_spy], axis=1, keys=['HYG', 'IEF', 'SPY']).dropna()
+        if df.empty: return {"status": "offline", "error": "Index Alignment Failed"}
+
         df['Credit_Ratio'] = df['HYG'] / df['IEF']
         df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
         spy_bullish = df['SPY'].iloc[-1] > df['SPY'].rolling(20).mean().iloc[-1]
@@ -136,7 +145,6 @@ def run_credit_stress_engine():
 def get_options_skew(ticker="SPY"):
     try:
         tk = yf.Ticker(ticker)
-        # 5d pull for weekend protection
         hist = tk.history(period="5d")
         if hist.empty: return {"status": "offline", "error": "No price data"}
         px = hist['Close'].iloc[-1]
@@ -174,8 +182,8 @@ def run_kinetic_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            df = yf.download(ticker, period="3mo", progress=False, auto_adjust=True)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            tk = yf.Ticker(ticker)
+            df = tk.history(period="3mo")
             df = df.dropna()
             if df.empty or len(df) < 40: continue
             
@@ -197,8 +205,8 @@ def run_dark_pool_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            df = yf.download(ticker, period="2mo", progress=False, auto_adjust=True)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            tk = yf.Ticker(ticker)
+            df = tk.history(period="2mo")
             df = df.dropna()
             if df.empty or len(df) < 20: continue
             
@@ -221,18 +229,20 @@ def run_dark_pool_radar():
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
     try:
-        df1 = yf.download(sym1, period="1y", progress=False)
-        if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.droplevel(1)
+        tk1 = yf.Ticker(sym1)
+        df1 = tk1.history(period="1y")
         if df1.empty: return {"status": "offline", "error": f"Failed to fetch {sym1}"}
         c1 = df1['Close']
+        if c1.index.tz is not None: c1.index = c1.index.tz_localize(None)
         
-        df2 = yf.download(sym2, period="1y", progress=False)
-        if isinstance(df2.columns, pd.MultiIndex): df2.columns = df2.columns.droplevel(1)
+        tk2 = yf.Ticker(sym2)
+        df2 = tk2.history(period="1y")
         if df2.empty: return {"status": "offline", "error": f"Failed to fetch {sym2}"}
         c2 = df2['Close']
+        if c2.index.tz is not None: c2.index = c2.index.tz_localize(None)
         
         df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
-        if df.empty: return {"status": "offline", "error": "Insufficient data overlap"}
+        if df.empty: return {"status": "offline", "error": "Insufficient data overlap / Timezone Conflict"}
         
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
@@ -250,8 +260,8 @@ def run_master_screener():
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
         try:
-            df = yf.download(ticker, period="6mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            tk = yf.Ticker(ticker)
+            df = tk.history(period="6mo")
             df = df.dropna()
             if df.empty or len(df) < 50: continue
             
@@ -294,11 +304,15 @@ def run_rrg_engine(universe="Macro"):
         volumes = pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
-                d = yf.download(t, period="6mo", progress=False)
-                if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
+                tk = yf.Ticker(t)
+                d = tk.history(period="6mo")
                 if not d.empty:
-                    closes[t] = d['Close']
-                    volumes[t] = d['Volume']
+                    c_col = d['Close']
+                    v_col = d['Volume']
+                    if c_col.index.tz is not None: c_col.index = c_col.index.tz_localize(None)
+                    if v_col.index.tz is not None: v_col.index = v_col.index.tz_localize(None)
+                    closes[t] = c_col
+                    volumes[t] = v_col
             except: pass
             
         closes = closes.dropna()
@@ -326,8 +340,8 @@ def run_rrg_engine(universe="Macro"):
 @st.cache_data(ttl=300)
 def run_tactical_chart(ticker):
     try:
-        df = yf.download(ticker, period="1y", progress=False)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+        tk = yf.Ticker(ticker)
+        df = tk.history(period="1y")
         df = df.dropna()
         if df.empty or len(df) < 50: return None, None
 
@@ -368,8 +382,8 @@ def run_tactical_chart(ticker):
         fig.update_xaxes(gridcolor='#30363d', zeroline=False)
 
         latest_data = {
-            "Close": df['Close'].iloc[-1], "SMA_50": df['SMA_50'].iloc[-1], "EMA_9": df['EMA_9'].iloc[-1], "EMA_21": df['EMA_21'].iloc[-1],
-            "Vol_SMA_9": df['Vol_SMA_9'].iloc[-1], "Vol_SMA_50": df['Vol_SMA_50'].iloc[-1], "Vol_Ratio": df['Vol_Ratio'].iloc[-1], "Range_Comp": df['Range_Comp'].iloc[-1], "ATR_20": df['ATR_20'].iloc[-1]
+            "Close": float(df['Close'].iloc[-1]), "SMA_50": float(df['SMA_50'].iloc[-1]), "EMA_9": float(df['EMA_9'].iloc[-1]), "EMA_21": float(df['EMA_21'].iloc[-1]),
+            "Vol_SMA_9": float(df['Vol_SMA_9'].iloc[-1]), "Vol_SMA_50": float(df['Vol_SMA_50'].iloc[-1]), "Vol_Ratio": float(df['Vol_Ratio'].iloc[-1]), "Range_Comp": float(df['Range_Comp'].iloc[-1]), "ATR_20": float(df['ATR_20'].iloc[-1])
         }
         return fig, latest_data
     except Exception as e: return None, None
@@ -522,7 +536,7 @@ with rot_col2:
             fig.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9'), xaxis=dict(title='Relative Strength vs Benchmark', gridcolor='#30363d', zeroline=False), yaxis=dict(title='Momentum', gridcolor='#30363d', zeroline=False), margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=400)
             st.plotly_chart(fig, width="stretch")
         else:
-            st.error("RRG Engine Offline. Could not fetch universe data.")
+            st.error(f"RRG Engine Offline: {rrg_engine.get('error', 'Unknown Error')}")
 
 # ==============================================================================
 # UI RENDERING: ROW 5 (THE GLOBAL SCREENER)

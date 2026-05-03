@@ -65,3 +65,167 @@ def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
 
 # Example Usage:
 # target_data = build_signal_engine("NVDA", period="5y")
+
+
+def run_execution_engine(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """
+    Path-dependent state machine. Loops through history day-by-day to 
+    simulate live trading execution and trailing ATR risk management.
+    """
+    print(f"[*] Initializing Phase 3: Execution Engine for {ticker}...")
+    
+    trade_ledger = []
+    in_position = False
+    entry_date = None
+    entry_price = 0.0
+    current_stop = 0.0
+
+    # Iterate through the DataFrame using a standard loop to access 'tomorrow' safely
+    for i in range(len(df) - 1):
+        today_date = df.index[i]
+        today = df.iloc[i]
+        tomorrow_date = df.index[i + 1]
+        tomorrow = df.iloc[i + 1]
+
+        # ---------------------------------------------------------------------
+        # ENTRY LOGIC
+        # ---------------------------------------------------------------------
+        if not in_position:
+            if today['Signal_Long']:
+                # Execute buy on the NEXT morning's open to prevent look-ahead bias
+                in_position = True
+                entry_date = tomorrow_date
+                entry_price = tomorrow['Open']
+                
+                # Set initial stop based on the signal day's volatility
+                current_stop = today['Close'] - (2 * today['ATR_20'])
+                
+                # Gap Down Guardrail: If tomorrow opens below our stop, we are stopped out instantly
+                if entry_price < current_stop:
+                    current_stop = entry_price 
+
+        # ---------------------------------------------------------------------
+        # RISK MANAGEMENT (WHILE IN POSITION)
+        # ---------------------------------------------------------------------
+        else:
+            # 1. TACTICAL EXIT (Intraday Stop Loss)
+            if today['Low'] <= current_stop:
+                exit_price = current_stop
+                
+                # Gap Down Guardrail: If it gapped down below stop at the open, we take the open price
+                if today['Open'] < current_stop:
+                    exit_price = today['Open']
+                    
+                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+                trade_ledger.append({
+                    "Ticker": ticker, "Entry Date": entry_date, "Entry Price": entry_price,
+                    "Exit Date": today_date, "Exit Price": exit_price,
+                    "Exit Reason": "Tactical Stop (2x ATR)", "PnL (%)": pnl_pct
+                })
+                in_position = False
+                continue # Trade closed, move to next day
+
+            # 2. STRUCTURAL EXIT (Lost 50 SMA Trend)
+            if today['Close'] < today['SMA_50']:
+                # Trend is broken. Sell on the NEXT morning's open.
+                exit_price = tomorrow['Open']
+                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+                
+                trade_ledger.append({
+                    "Ticker": ticker, "Entry Date": entry_date, "Entry Price": entry_price,
+                    "Exit Date": tomorrow_date, "Exit Price": exit_price,
+                    "Exit Reason": "Structural Stop (50 SMA)", "PnL (%)": pnl_pct
+                })
+                in_position = False
+                continue # Trade closed, move to next day
+
+            # 3. TRAILING STOP RATCHET
+            # If we survived today, calculate the new theoretical stop
+            theoretical_stop = today['Close'] - (2 * today['ATR_20'])
+            # Only update if the new stop is HIGHER than the current stop
+            if theoretical_stop > current_stop:
+                current_stop = theoretical_stop
+
+    # -------------------------------------------------------------------------
+    # CLEANUP: Close open positions at the end of the dataset
+    # -------------------------------------------------------------------------
+    if in_position:
+        last_day = df.iloc[-1]
+        exit_price = last_day['Close']
+        pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+        trade_ledger.append({
+            "Ticker": ticker, "Entry Date": entry_date, "Entry Price": entry_price,
+            "Exit Date": df.index[-1], "Exit Price": exit_price,
+            "Exit Reason": "End of Backtest Dataset", "PnL (%)": pnl_pct
+        })
+
+    ledger_df = pd.DataFrame(trade_ledger)
+    print(f"[*] Execution Engine complete. Processed {len(ledger_df)} trades.")
+    return ledger_df
+
+
+def generate_performance_analytics(ledger_df: pd.DataFrame):
+    """
+    Compiles the trade ledger into core quantitative metrics.
+    """
+    print("\n" + "="*50)
+    print("🦅 TITAN OMEGA: PERFORMANCE LEDGER 🦅")
+    print("="*50)
+    
+    if ledger_df.empty:
+        print("[!] No trades executed during this period based on current logic.")
+        return
+
+    total_trades = len(ledger_df)
+    winning_trades = ledger_df[ledger_df['PnL (%)'] > 0]
+    losing_trades = ledger_df[ledger_df['PnL (%)'] <= 0]
+    
+    win_rate = (len(winning_trades) / total_trades) * 100
+    avg_win = winning_trades['PnL (%)'].mean() if not winning_trades.empty else 0.0
+    avg_loss = losing_trades['PnL (%)'].mean() if not losing_trades.empty else 0.0
+    
+    # Expectancy Ratio (The ultimate measure of system health)
+    loss_rate_decimal = len(losing_trades) / total_trades
+    win_rate_decimal = win_rate / 100
+    
+    if loss_rate_decimal == 0 or avg_loss == 0:
+        expectancy = float('inf')
+    else:
+        expectancy = (win_rate_decimal * avg_win) / (loss_rate_decimal * abs(avg_loss))
+        
+    # Total System ROI (Compound approach)
+    multipliers = 1 + (ledger_df['PnL (%)'] / 100)
+    total_roi_pct = (multipliers.prod() - 1) * 100
+
+    print(f"Total Trades Exited:  {total_trades}")
+    print(f"System Win Rate:      {win_rate:.2f}%")
+    print(f"Average Winning PnL:  +{avg_win:.2f}%")
+    print(f"Average Losing PnL:   {avg_loss:.2f}%")
+    print(f"Expectancy Ratio:     {expectancy:.2f}")
+    print(f"Total System ROI:     {total_roi_pct:.2f}%")
+    print("="*50 + "\n")
+
+
+# ==============================================================================
+# MASTER EXECUTION BLOCK
+# ==============================================================================
+if __name__ == "__main__":
+    # 1. Define Target and Time Horizon
+    TARGET_TICKER = "NVDA" 
+    TEST_PERIOD = "5y"
+    
+    # 2. Run the Engine Pipeline
+    df_signals = build_signal_engine(TARGET_TICKER, period=TEST_PERIOD)
+    
+    if not df_signals.empty:
+        df_ledger = run_execution_engine(df_signals, TARGET_TICKER)
+        generate_performance_analytics(df_ledger)
+        
+        if not df_ledger.empty:
+            print("Recent Trade Logs (Last 5):")
+            # Format the output for readability
+            st_ledger = df_ledger.tail(5).copy()
+            st_ledger['Entry Price'] = st_ledger['Entry Price'].map('${:,.2f}'.format)
+            st_ledger['Exit Price'] = st_ledger['Exit Price'].map('${:,.2f}'.format)
+            st_ledger['PnL (%)'] = st_ledger['PnL (%)'].map('{:+.2f}%'.format)
+            print(st_ledger.to_string(index=False))

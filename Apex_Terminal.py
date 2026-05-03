@@ -1,11 +1,12 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.24 + Hybrid API Protocol)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.25 + YahooQuery Stealth Patch)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+from yahooquery import Ticker as yq_Ticker
 import requests
 import zipfile
 import io
@@ -52,16 +53,37 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# DATA ENGINES (HYBRID API PROTOCOL)
+# UNIVERSAL YAHOOQUERY INGESTION ENGINE
+# ==============================================================================
+def get_yq_data(ticker, period="1y"):
+    """Stealth backend wrapper for YahooQuery to emulate yfinance DataFrames."""
+    try:
+        tk = yq_Ticker(ticker)
+        df = tk.history(period=period)
+        if df is None or (isinstance(df, dict) and ticker in df and isinstance(df[ticker], str)):
+            return pd.DataFrame()
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            if isinstance(df.index, pd.MultiIndex):
+                df = df.reset_index(level='symbol', drop=True)
+            df = df.rename(columns={'close': 'Close', 'volume': 'Volume', 'high': 'High', 'low': 'Low', 'open': 'Open'})
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+# ==============================================================================
+# DATA ENGINES 
 # ==============================================================================
 @st.cache_data(ttl=300)
 def get_risk_engine():
     try:
-        data = yf.download(["^VIX", "^VIX3M"], period="5d", progress=False)['Close']
-        data = data.dropna()
-        if data.empty: return {"status": "offline", "error": "API returned empty dataset"}
-        vix = float(data['^VIX'].iloc[-1])
-        vix3m = float(data['^VIX3M'].iloc[-1])
+        vix_df = get_yq_data("^VIX", period="5d")
+        vix3m_df = get_yq_data("^VIX3M", period="5d")
+        if vix_df.empty or vix3m_df.empty: return {"status": "offline", "error": "API returned empty dataset"}
+        vix = float(vix_df['Close'].iloc[-1])
+        vix3m = float(vix3m_df['Close'].iloc[-1])
         return {"vix": vix, "vix3m": vix3m, "ratio": vix / vix3m, "status": "online"}
     except Exception as e: return {"status": "offline", "error": str(e)}
 
@@ -99,13 +121,11 @@ def get_gamma_walls():
     results = []
     for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
         try:
-            df = yf.download(ticker, period="5d", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
+            df = get_yq_data(ticker, period="5d")
             if df.empty: continue
             px = float(df['Close'].iloc[-1])
             
-            tk = yf.Ticker(ticker)
+            tk = yf.Ticker(ticker) # Keeping YF for options chains (different endpoint)
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
@@ -122,21 +142,12 @@ def get_gamma_walls():
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
     try:
-        # yf.download sequence for max stability
-        df_hyg = yf.download("HYG", period="6mo", progress=False)
-        df_ief = yf.download("IEF", period="6mo", progress=False)
-        df_spy = yf.download("SPY", period="6mo", progress=False)
-        
-        if isinstance(df_hyg.columns, pd.MultiIndex): df_hyg.columns = df_hyg.columns.droplevel(1)
-        if isinstance(df_ief.columns, pd.MultiIndex): df_ief.columns = df_ief.columns.droplevel(1)
-        if isinstance(df_spy.columns, pd.MultiIndex): df_spy.columns = df_spy.columns.droplevel(1)
+        df_hyg = get_yq_data("HYG", period="6mo")
+        df_ief = get_yq_data("IEF", period="6mo")
+        df_spy = get_yq_data("SPY", period="6mo")
         
         c_hyg, c_ief, c_spy = df_hyg['Close'].dropna(), df_ief['Close'].dropna(), df_spy['Close'].dropna()
         if c_hyg.empty or c_ief.empty or c_spy.empty: return {"status": "offline", "error": "API returned empty dataset"}
-        
-        if c_hyg.index.tz is not None: c_hyg.index = c_hyg.index.tz_localize(None)
-        if c_ief.index.tz is not None: c_ief.index = c_ief.index.tz_localize(None)
-        if c_spy.index.tz is not None: c_spy.index = c_spy.index.tz_localize(None)
         
         df = pd.concat([c_hyg, c_ief, c_spy], axis=1, keys=['HYG', 'IEF', 'SPY']).dropna()
         if df.empty: return {"status": "offline", "error": "Index Alignment Failed"}
@@ -152,9 +163,7 @@ def run_credit_stress_engine():
 @st.cache_data(ttl=900)
 def get_options_skew(ticker="SPY"):
     try:
-        df = yf.download(ticker, period="5d", progress=False)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-        df = df.dropna()
+        df = get_yq_data(ticker, period="5d")
         if df.empty: return {"status": "offline", "error": "No price data (API Block)"}
         px = float(df['Close'].iloc[-1])
         
@@ -193,9 +202,7 @@ def run_kinetic_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            df = yf.download(ticker, period="3mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
+            df = get_yq_data(ticker, period="3mo")
             if df.empty or len(df) < 40: continue
             
             high = float(df['High'].rolling(40).max().iloc[-1])
@@ -216,9 +223,7 @@ def run_dark_pool_radar():
     results = []
     for ticker in cfg.LIEUTENANTS:
         try:
-            df = yf.download(ticker, period="2mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
+            df = get_yq_data(ticker, period="2mo")
             if df.empty or len(df) < 20: continue
             
             close = float(df['Close'].iloc[-1])
@@ -240,19 +245,13 @@ def run_dark_pool_radar():
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
     try:
-        df1 = yf.download(sym1, period="1y", progress=False)
-        if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.droplevel(1)
-        df1 = df1.dropna()
+        df1 = get_yq_data(sym1, period="1y")
         if df1.empty: return {"status": "offline", "error": f"API Blocked {sym1}"}
         c1 = df1['Close']
-        if c1.index.tz is not None: c1.index = c1.index.tz_localize(None)
         
-        df2 = yf.download(sym2, period="1y", progress=False)
-        if isinstance(df2.columns, pd.MultiIndex): df2.columns = df2.columns.droplevel(1)
-        df2 = df2.dropna()
+        df2 = get_yq_data(sym2, period="1y")
         if df2.empty: return {"status": "offline", "error": f"API Blocked {sym2}"}
         c2 = df2['Close']
-        if c2.index.tz is not None: c2.index = c2.index.tz_localize(None)
         
         df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
         if df.empty: return {"status": "offline", "error": "Insufficient data overlap / Timezone Conflict"}
@@ -273,9 +272,7 @@ def run_master_screener():
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
         try:
-            df = yf.download(ticker, period="6mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
+            df = get_yq_data(ticker, period="6mo")
             if df.empty or len(df) < 50: continue
             
             c, v = float(df['Close'].iloc[-1]), float(df['Volume'].iloc[-1])
@@ -317,16 +314,10 @@ def run_rrg_engine(universe="Macro"):
         volumes = pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
-                d = yf.download(t, period="6mo", progress=False)
-                if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
-                d = d.dropna()
+                d = get_yq_data(t, period="6mo")
                 if not d.empty:
-                    c_col = d['Close']
-                    v_col = d['Volume']
-                    if c_col.index.tz is not None: c_col.index = c_col.index.tz_localize(None)
-                    if v_col.index.tz is not None: v_col.index = v_col.index.tz_localize(None)
-                    closes[t] = c_col
-                    volumes[t] = v_col
+                    closes[t] = d['Close']
+                    volumes[t] = d['Volume']
             except: pass
             
         closes = closes.dropna()
@@ -354,9 +345,7 @@ def run_rrg_engine(universe="Macro"):
 @st.cache_data(ttl=300)
 def run_tactical_chart(ticker):
     try:
-        df = yf.download(ticker, period="1y", progress=False)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-        df = df.dropna()
+        df = get_yq_data(ticker, period="1y")
         if df.empty or len(df) < 50: return None, None
 
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -559,7 +548,7 @@ st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTE
 st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized scan of the entire configuration universe for algorithmic setup confirmation.</p>", unsafe_allow_html=True)
 
 if st.button("EXECUTE GLOBAL SCAN"):
-    with st.spinner("Compiling cross-asset vector data (Bypassing bulk-API limits)..."):
+    with st.spinner("Compiling cross-asset vector data via YahooQuery backend..."):
         screen_df = run_master_screener()
         if not screen_df.empty:
             st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), width="stretch", hide_index=True)

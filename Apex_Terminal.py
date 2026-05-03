@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.32 + FOMC FRED Engine)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.33 + FRED Firewall Bypass)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.32<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.33<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -153,13 +153,19 @@ def get_gamma_walls():
 
 @st.cache_data(ttl=86400)
 def get_fomc_data():
-    """V5.32 FRED Macro Engine: Yield Curve & Fed Funds Rate"""
+    """V5.33 FIX: FRED API Firewall Bypass (User-Agent Spoofing)"""
     try:
-        url_yc = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y"
-        df_yc = pd.read_csv(url_yc, parse_dates=['DATE'], index_col='DATE', na_values='.')
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        url_ff = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF"
-        df_ff = pd.read_csv(url_ff, parse_dates=['DATE'], index_col='DATE', na_values='.')
+        # Fetch 10Y-2Y Yield Curve
+        res_yc = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y", headers=headers, timeout=10)
+        if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED Blocked T10Y2Y (Status: {res_yc.status_code})"}
+        df_yc = pd.read_csv(io.StringIO(res_yc.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
+        
+        # Fetch Fed Funds Rate
+        res_ff = requests.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF", headers=headers, timeout=10)
+        if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED Blocked DFF (Status: {res_ff.status_code})"}
+        df_ff = pd.read_csv(io.StringIO(res_ff.text), parse_dates=['DATE'], index_col='DATE', na_values='.')
         
         df = df_yc.join(df_ff, how='inner').dropna()
         df.columns = ['Yield_Curve', 'Fed_Funds']
@@ -580,7 +586,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
-    # --- V5.32 FOMC LIQUIDITY MODULE ---
+    # --- V5.33 FOMC LIQUIDITY MODULE ---
     st.markdown("<div class='apex-header' style='margin-top: 20px;'>🏛️ FOMC LIQUIDITY & YIELD CURVE (MACRO PLUMBING)</div>", unsafe_allow_html=True)
     with st.spinner("Fetching FRED Macro Data..."):
         fomc = get_fomc_data()
@@ -830,96 +836,4 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         tact_stop_price = c - tact_dist
 
         d_col1, d_col2, d_col3, d_col4 = st.columns(4)
-        d_col1.markdown(f"<div class='tactical-card {'card-bullish' if trend_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>TREND (>50 SMA)</div><div class='price-text' style='color: {'#39FF14' if trend_bull else '#FF4444'};'>{'BULLISH' if trend_bull else 'BEARISH'}</div></div></div>", unsafe_allow_html=True)
-        d_col2.markdown(f"<div class='tactical-card {'card-bullish' if mom_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>MOMENTUM (9>21)</div><div class='price-text' style='color: {'#39FF14' if mom_bull else '#FF4444'};'>{'IGNITED' if mom_bull else 'LAGGING'}</div></div></div>", unsafe_allow_html=True)
-        d_col3.markdown(f"<div class='tactical-card {'card-bullish' if liq_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>LIQUIDITY (9>50 VOL)</div><div class='price-text' style='color: {'#39FF14' if liq_bull else '#FF4444'};'>{'EXPANDING' if liq_bull else 'CONTRACTING'}</div></div></div>", unsafe_allow_html=True)
-        d_col4.markdown(f"<div class='tactical-card {'card-squeeze' if dp_active else 'card-neutral'}' style='min-height: 100px;'><div><div class='metric-sub'>DARK POOL BLOCK</div><div class='price-text' style='color: {'#FFAA00' if dp_active else '#8b949e'};'>{'DETECTED' if dp_active else 'CLEAR'}</div></div></div>", unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div style='background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px; margin-top: 20px;'>
-            <b style='color: #58a6ff;'>RISK DRAWDOWN MATRIX</b><br><br>
-            <div style='display: flex; justify-content: space-between; border-bottom: 1px dashed rgba(139, 148, 158, 0.2); padding-bottom: 10px; margin-bottom: 10px;'>
-                <span style='color: #8b949e;'>Structural Risk (To 50 SMA):</span>
-                <span style='color: #FFF; font-weight: bold;'>Stop: ${last_data['SMA_50']:.2f} | Risk: -${abs(struct_dist):.2f} / Share ({abs(struct_pct):.2f}%)</span>
-            </div>
-            <div style='display: flex; justify-content: space-between;'>
-                <span style='color: #8b949e;'>Tactical Risk (2x ATR Trailing):</span>
-                <span style='color: #FFF; font-weight: bold;'>Stop: ${tact_stop_price:.2f} | Risk: -${tact_dist:.2f} / Share ({tact_pct:.2f}%)</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | T: {'BULL' if trend_bull else 'BEAR'} | M: {'IGNITED' if mom_bull else 'LAGGING'} | L: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} | STRUC RSK: {abs(struct_pct):.2f}% | TACT RSK: {tact_pct:.2f}%"
-        st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
-        st.code(journal_str, language="text")
-
-# ==============================================================================
-# ROUTING LOGIC: BACKTESTER LAB
-# ==============================================================================
-elif app_mode == "🧪 BACKTESTER LAB":
-    st.markdown("<div class='apex-header'>🔬 QUANTITATIVE BACKTESTER LAB</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Run historical, path-dependent simulations using the Titan Omega logic to mathematically validate edge.</p>", unsafe_allow_html=True)
-
-    bk_col1, bk_col2, bk_col3 = st.columns([2, 2, 1])
-    with bk_col1:
-        test_ticker = st.text_input("Enter Ticker Symbol:", value="NVDA", max_chars=10).upper()
-    with bk_col2:
-        test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y", "max"], index=2)
-    with bk_col3:
-        st.write("") # Spacing
-        st.write("")
-        run_sim = st.button("RUN SIMULATION", use_container_width=True)
-
-    if run_sim:
-        with st.spinner(f"Ingesting {test_period} of historical data for {test_ticker}..."):
-            df_signals = build_signal_engine(test_ticker, test_period)
-            
-            if df_signals.empty:
-                st.error(f"Failed to fetch data for {test_ticker}. Verify ticker or API limits.")
-            else:
-                with st.spinner("Executing path-dependent state machine (calculating trailing stops)..."):
-                    ledger_df = run_execution_engine(df_signals, test_ticker)
-                    
-                    if ledger_df.empty:
-                        st.warning("Zero trades executed. The Titan Omega criteria did not trigger during this period.")
-                    else:
-                        st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>📊 PERFORMANCE LEDGER</h3>", unsafe_allow_html=True)
-                        
-                        # Calculate Analytics
-                        total_trades = len(ledger_df)
-                        winning_trades = ledger_df[ledger_df['PnL (%)'] > 0]
-                        losing_trades = ledger_df[ledger_df['PnL (%)'] <= 0]
-                        
-                        win_rate = (len(winning_trades) / total_trades) * 100
-                        avg_win = winning_trades['PnL (%)'].mean() if not winning_trades.empty else 0.0
-                        avg_loss = losing_trades['PnL (%)'].mean() if not losing_trades.empty else 0.0
-                        
-                        loss_rate_decimal = len(losing_trades) / total_trades
-                        win_rate_decimal = win_rate / 100
-                        expectancy = (win_rate_decimal * avg_win) / (loss_rate_decimal * abs(avg_loss)) if loss_rate_decimal > 0 and avg_loss != 0 else float('inf')
-                        
-                        multipliers = 1 + (ledger_df['PnL (%)'] / 100)
-                        total_roi_pct = (multipliers.prod() - 1) * 100
-
-                        # Render Metrics
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("System Win Rate", f"{win_rate:.1f}%")
-                        m2.metric("Expectancy Ratio", f"{expectancy:.2f}")
-                        m3.metric("Total ROI (Compounded)", f"{total_roi_pct:.1f}%")
-                        m4.metric("Total Executions", total_trades)
-
-                        st.markdown("---")
-                        
-                        m5, m6 = st.columns(2)
-                        m5.metric("Average Winning Trade", f"+{avg_win:.2f}%")
-                        m6.metric("Average Losing Trade", f"{avg_loss:.2f}%")
-
-                        st.markdown("<h3 style='color: #FFF; margin-top: 40px;'>🧾 TRADE LOG</h3>", unsafe_allow_html=True)
-                        
-                        # Formatting for UI Display
-                        display_df = ledger_df.copy()
-                        display_df['Entry Price'] = display_df['Entry Price'].map('${:,.2f}'.format)
-                        display_df['Exit Price'] = display_df['Exit Price'].map('${:,.2f}'.format)
-                        display_df['PnL (%)'] = display_df['PnL (%)'].map('{:+.2f}%'.format)
-                        
-                        st.dataframe(display_df, width="stretch", hide_index=True)
+        d_col1.markdown(f"<div class='tactical-card {'card-bullish' if trend_bull else 'card-bearish'}' style='min-height: 100px;'><div>

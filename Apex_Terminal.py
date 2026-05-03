@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.18 + Namespace Stabilized)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.19 + Syntax Patch)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -187,17 +187,14 @@ def run_master_screener():
             atr_20 = float((df['High'] - df['Low']).rolling(20).mean().iloc[-1])
             rng = float(df['High'].iloc[-1] - df['Low'].iloc[-1])
             
-            # Logic Gates
             trend = c > sma_50
             mom = ema_9 > ema_21
             liq = vol_sma_9 > vol_sma_50
             dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
             dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
             
-            # Scoring Matrix
             score = sum([trend, mom, liq, dp_vol, dp_comp])
             
-            # Categorization
             if score == 5: cat = "🔥 TIER 1: PERFECT SETUP"
             elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH ACCUMULATION"
             elif mom and liq: cat = "🚀 KINETIC BREAKOUT"
@@ -336,7 +333,7 @@ with st.spinner("Calibrating Volatility Engines..."):
         if r >= 1.0: color, title, sub, b_bg = "#FF4444", "🚨 DEFCON 1: VOLATILITY INVERTED", "Market Makers pricing immediate crash. HALT LONGS.", "rgba(255, 68, 68, 0.1)"
         elif r >= 0.9: color, title, sub, b_bg = "#FFAA00", "⚠️ DEFCON 3: ELEVATED RISK", "Term Structure flattening. Reduce sizing.", "rgba(255, 170, 0, 0.1)"
         else: color, title, sub, b_bg = "#39FF14", "🟢 DEFCON 5: NORMAL CONTANGO", "Institutional fear low. High probability breakouts.", "rgba(57, 255, 20, 0.05)"
-        st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M Ratio: {r:.2f})</span></div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='defcon-banner' style='border-color: {color}; background-color: {b_bg};'><div class='defcon-title' style='color: {color};'>{title}</div><div class='defcon-sub' style='color: #c9d1d9;'>{sub} <span style='color:{color};'>(VIX/VIX3M: {r:.2f})</span></div></div>", unsafe_allow_html=True)
 
 # ==============================================================================
 # UI RENDERING: MACRO & DEALER MATRIX
@@ -390,7 +387,7 @@ if st.button("EXECUTE GLOBAL SCAN"):
     with st.spinner("Compiling cross-asset vector data (Bypassing bulk-API limits)..."):
         screen_df = run_master_screener()
         if not screen_df.empty:
-            st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), use_container_width=True, hide_index=True)
+            st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), width="stretch", hide_index=True)
         else:
             st.info("No actionable Tier 1 or Stealth setups detected across the universe today.")
 
@@ -411,13 +408,21 @@ with recon_col1:
 with recon_col2:
     with st.spinner(f"Loading {target_chart}..."):
         chart_fig, last_data = run_tactical_chart(target_chart)
-        if chart_fig: st.plotly_chart(chart_fig, use_container_width=True)
+        if chart_fig: st.plotly_chart(chart_fig, width="stretch")
 
 if last_data:
     c = last_data['Close']
-    trend_bull, mom_bull, liq_bull = c > last_data['SMA_50'], last_data['EMA_9'] > last_data['EMA_21'], last_data['Vol_SMA_9'] > last_data['Vol_SMA_50']
+    trend_bull = c > last_data['SMA_50']
+    mom_bull = last_data['EMA_9'] > last_data['EMA_21']
+    liq_bull = last_data['Vol_SMA_9'] > last_data['Vol_SMA_50']
     dp_active = (last_data['Vol_Ratio'] >= 1.5) and (last_data['Range_Comp'] <= 0.75)
-    struct_pct, tact_pct = ((c - last_data['SMA_50']) / c) * 100, ((2 * last_data['ATR_20']) / c) * 100
+    
+    # RESTORED MISSING RISK CALCULATION VARIABLES
+    struct_dist = c - last_data['SMA_50']
+    struct_pct = (struct_dist / c) * 100
+    tact_dist = 2 * last_data['ATR_20']
+    tact_pct = (tact_dist / c) * 100
+    tact_stop_price = c - tact_dist
 
     d_col1, d_col2, d_col3, d_col4 = st.columns(4)
     d_col1.markdown(f"<div class='tactical-card {'card-bullish' if trend_bull else 'card-bearish'}' style='min-height: 100px;'><div><div class='metric-sub'>TREND (>50 SMA)</div><div class='price-text' style='color: {'#39FF14' if trend_bull else '#FF4444'};'>{'BULLISH' if trend_bull else 'BEARISH'}</div></div></div>", unsafe_allow_html=True)
@@ -439,6 +444,6 @@ if last_data:
     </div>
     """, unsafe_allow_html=True)
     
-    journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | TREND: {'BULL' if trend_bull else 'BEAR'} | MOMENTUM: {'IGNITED' if mom_bull else 'LAGGING'} | LIQ: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} || RISK -> STRUC: {abs(struct_pct):.2f}%, TACT: {tact_pct:.2f}%"
+    journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | T: {'BULL' if trend_bull else 'BEAR'} | M: {'IGNITED' if mom_bull else 'LAGGING'} | L: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} | STRUC RSK: {abs(struct_pct):.2f}% | TACT RSK: {tact_pct:.2f}%"
     st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
     st.code(journal_str, language="text")

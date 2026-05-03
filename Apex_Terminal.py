@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.31 + Institutional Divergence Charts)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.32 + FOMC FRED Engine)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.31<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.32<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -151,6 +151,27 @@ def get_gamma_walls():
         except: pass
     return results
 
+@st.cache_data(ttl=86400)
+def get_fomc_data():
+    """V5.32 FRED Macro Engine: Yield Curve & Fed Funds Rate"""
+    try:
+        url_yc = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y"
+        df_yc = pd.read_csv(url_yc, parse_dates=['DATE'], index_col='DATE', na_values='.')
+        
+        url_ff = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF"
+        df_ff = pd.read_csv(url_ff, parse_dates=['DATE'], index_col='DATE', na_values='.')
+        
+        df = df_yc.join(df_ff, how='inner').dropna()
+        df.columns = ['Yield_Curve', 'Fed_Funds']
+        df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
+        
+        if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
+        
+        status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
+        return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
+
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
     try:
@@ -178,7 +199,6 @@ def run_credit_stress_engine():
         credit_bearish = float(df['Credit_Ratio'].iloc[-1]) < float(df['Ratio_20SMA'].iloc[-1])
         divergence = spy_bullish and credit_bearish
         
-        # V5.31 UPDATE: Return full history array for plotting
         return {
             "status": "online", "divergence": divergence, 
             "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1]),
@@ -211,7 +231,6 @@ def get_options_skew(ticker="SPY"):
 
 @st.cache_data(ttl=3600)
 def get_options_flow_chart_data(live_pcr, ticker="SPY"):
-    """V5.31 UPDATE: Synthetic Proxy to visualize historical options flow anchoring to live PCR snapshot"""
     try:
         df = yf.download([ticker, "^VIX"], period="6mo", progress=False)['Close'].dropna()
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
@@ -480,7 +499,6 @@ def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
     ema_below_yesterday = df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)
     kinetic_cross = ema_above_today & ema_below_yesterday
     
-    # Kinetic Ignition (Today's Volume > 1.2x of 20-Day Average)
     liquidity_expanding = df['Volume'] > (df['Vol_SMA_20'] * 1.2)
 
     df['Signal_Long'] = trend_bullish & kinetic_cross & liquidity_expanding
@@ -562,9 +580,47 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
+    # --- V5.32 FOMC LIQUIDITY MODULE ---
+    st.markdown("<div class='apex-header' style='margin-top: 20px;'>🏛️ FOMC LIQUIDITY & YIELD CURVE (MACRO PLUMBING)</div>", unsafe_allow_html=True)
+    with st.spinner("Fetching FRED Macro Data..."):
+        fomc = get_fomc_data()
+        if fomc['status'] == 'online':
+            df_fomc = fomc['data']
+            yc_val = fomc['current_yc']
+            ff_val = fomc['current_ff']
+            
+            yc_color = "#FF4444" if yc_val < 0 else "#39FF14"
+            
+            st.markdown(f"""
+            <div style='display: flex; gap: 20px; margin-bottom: 20px;'>
+                <div class='tactical-card' style='flex: 1; min-height: 100px; border-left: 5px solid {yc_color};'>
+                    <div class='metric-sub'>10Y-2Y YIELD CURVE</div>
+                    <div class='price-text' style='color: {yc_color};'>{yc_val:+.2f}% ({fomc['curve_status']})</div>
+                </div>
+                <div class='tactical-card' style='flex: 1; min-height: 100px; border-left: 5px solid #58a6ff;'>
+                    <div class='metric-sub'>FED FUNDS RATE (COST OF CAPITAL)</div>
+                    <div class='price-text' style='color: #58a6ff;'>{ff_val:.2f}%</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            fig_fomc = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_fomc.add_trace(go.Scatter(x=df_fomc.index, y=df_fomc['Yield_Curve'], name="10Y-2Y Spread", line=dict(color=yc_color, width=2), fill='tozeroy', fillcolor=f'rgba({255 if yc_val < 0 else 57}, {68 if yc_val < 0 else 255}, {68 if yc_val < 0 else 20}, 0.1)'), secondary_y=False)
+            fig_fomc.add_trace(go.Scatter(x=df_fomc.index, y=df_fomc['Fed_Funds'], name="Fed Funds Rate", line=dict(color='#58a6ff', width=2, dash='dot')), secondary_y=True)
+            fig_fomc.add_hline(y=0, line_dash="dash", line_color="#FFF", secondary_y=False)
+            
+            fig_fomc.update_layout(plot_bgcolor='#161b22', paper_bgcolor='#161b22', font=dict(color='#c9d1d9'), margin=dict(l=10, r=10, t=10, b=10), height=350, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+            fig_fomc.update_yaxes(title_text="Yield Curve Spread (%)", secondary_y=False, showgrid=False)
+            fig_fomc.update_yaxes(title_text="Fed Funds Rate (%)", secondary_y=True, showgrid=False)
+            fig_fomc.update_xaxes(showgrid=False)
+            
+            st.plotly_chart(fig_fomc, width="stretch", key="fomc_chart")
+        else:
+            st.error(f"FOMC Engine Offline: {fomc.get('error', 'Unknown Error')}")
+
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
-        st.markdown("<div class='apex-header'>🌊 MACRO TIDE (SMART MONEY)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='apex-header' style='margin-top: 20px;'>🌊 MACRO TIDE (SMART MONEY)</div>", unsafe_allow_html=True)
         macro_df, date = get_macro_tide()
         if not macro_df.empty:
             for _, row in macro_df.iterrows():
@@ -575,7 +631,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>{row['Asset']}</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>BIAS:</span><span style='color:{tc}; font-weight:bold;'>{'NET LONG' if l else 'NET SHORT'} ({i:.1f}%)</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='apex-header'>☢️ DEALER MATRIX (MULTI-TIER GAMMA)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='apex-header' style='margin-top: 20px;'>☢️ DEALER MATRIX (MULTI-TIER GAMMA)</div>", unsafe_allow_html=True)
         with st.spinner("Scanning Institutional Options Chains..."):
             for g in get_gamma_walls():
                 zg = g['Zero Gamma']
@@ -583,7 +639,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 p1, p2 = g['Put Wall 1'], g['Put Wall 2']
                 px = g['Price']
 
-                # Volatility Switch State
                 if px >= zg:
                     vol_state = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>"
                     cc_main = "card-neutral"
@@ -610,9 +665,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
     c_col1, c_col2 = st.columns([1, 1], gap="large")
     
-    credit_data = None
-    skew_data = None
-    
     with c_col1:
         with st.spinner("Pulling High Yield Spreads & Rendering Divergence Chart..."):
             credit_data = run_credit_stress_engine()
@@ -620,7 +672,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit_data['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
                 st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit_data['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit_data['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit_data['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
                 
-                # --- V5.31 CREDIT CHART ---
                 df_c = credit_data['history']
                 fig_c = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_c.add_trace(go.Scatter(x=df_c.index, y=df_c['SPY'], name="SPY Price", line=dict(color='#58a6ff', width=2)), secondary_y=False)
@@ -639,7 +690,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
                 st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew_data['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew_data['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
                 
-                # --- V5.31 OPTIONS FLOW CHART ---
                 df_o = get_options_flow_chart_data(skew_data['pcr'])
                 if df_o is not None:
                     fig_o = make_subplots(specs=[[{"secondary_y": True}]])

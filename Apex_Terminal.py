@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.36 + Cross-Asset Heatmap)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.37 + Redundancy Pruned)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.36<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.37<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -190,18 +190,15 @@ def get_fomc_data():
 
 @st.cache_data(ttl=3600)
 def get_cross_asset_matrix():
-    """V5.36 MACRO PHYSICS: 90-Day Rolling Pearson Correlation"""
     tickers = ["SPY", "QQQ", "TLT", "GLD", "USO", "UUP", "BTC-USD"]
     try:
         df = yf.download(tickers, period="3mo", progress=False)['Close']
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
         df = df.dropna(how='all')
         
-        # Calculate Daily Returns
         returns = df.pct_change().dropna()
         if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
         
-        # Calculate Correlation and order properly
         corr_matrix = returns.corr().round(2)
         valid_tickers = [t for t in tickers if t in corr_matrix.columns]
         corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
@@ -281,71 +278,6 @@ def get_options_flow_chart_data(live_pcr, ticker="SPY"):
         return df.tail(120)
     except Exception:
         return None
-
-@st.cache_data(ttl=86400)
-def get_insider_signals():
-    results = []
-    scan_list = list(dict.fromkeys(cfg.AI_THEMATIC[:5] + cfg.CRYPTO_THEMATIC[:3])) 
-    for ticker in scan_list:
-        try:
-            tk = yf.Ticker(ticker)
-            it = tk.insider_transactions
-            if it is not None and not it.empty:
-                buys = it[it.iloc[:, 0].astype(str).str.contains("Buy|Purchase", case=False, na=False)]
-                if not buys.empty:
-                    results.append({"Ticker": ticker, "Status": "Recent Accumulation Detected"})
-        except: pass
-    if not results: results.append({"Ticker": "SYSTEM", "Status": "No anomalous C-Suite blocks detected today."})
-    return pd.DataFrame(results)
-
-@st.cache_data(ttl=900)
-def run_kinetic_radar():
-    results = []
-    for ticker in cfg.LIEUTENANTS:
-        try:
-            df = yf.download(ticker, period="3mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
-            if df.empty or len(df) < 40: continue
-            
-            high = float(df['High'].rolling(40).max().iloc[-1])
-            close = float(df['Close'].iloc[-1])
-            vol = float(df['Volume'].iloc[-1])
-            vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-            
-            dist = ((close - high) / high) * 100
-            v_spike = vol / vol_20 if vol_20 > 0 else 0
-            
-            if dist >= cfg.MIN_DONCHIAN_PROX and v_spike >= cfg.MIN_VOLUME_SPIKE: 
-                results.append({"Ticker": ticker, "Dist to High (%)": dist, "Vol Spike (x)": v_spike, "Price": close})
-        except: pass
-    return pd.DataFrame(results)
-
-@st.cache_data(ttl=900)
-def run_dark_pool_radar():
-    results = []
-    for ticker in cfg.LIEUTENANTS:
-        try:
-            df = yf.download(ticker, period="2mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
-            if df.empty or len(df) < 20: continue
-            
-            close = float(df['Close'].iloc[-1])
-            vol = float(df['Volume'].iloc[-1])
-            vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-            
-            df['Range'] = df['High'] - df['Low']
-            atr_20 = float(df['Range'].rolling(20).mean().iloc[-1])
-            current_range = float(df['Range'].iloc[-1])
-            
-            v_spike = vol / vol_20 if vol_20 > 0 else 0
-            range_compression = current_range / atr_20 if atr_20 > 0 else 1
-            
-            if v_spike >= 1.5 and range_compression <= 0.75: 
-                results.append({"Ticker": ticker, "Vol Spike (x)": v_spike, "Price Compression": range_compression, "Price": close})
-        except: pass
-    return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
@@ -618,7 +550,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"DEFCON Engine Offline: {risk.get('error', 'Unknown')}")
 
-    # --- V5.35 FOMC LIQUIDITY MODULE ---
     st.markdown("<div class='apex-header' style='margin-top: 20px;'>🏛️ FOMC LIQUIDITY & YIELD CURVE (MACRO PLUMBING)</div>", unsafe_allow_html=True)
     with st.spinner("Fetching FRED Macro Data..."):
         fomc = get_fomc_data()
@@ -656,18 +587,16 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         else:
             st.error(f"FOMC Engine Offline: {fomc.get('error', 'Unknown Error')}")
 
-    # --- V5.36 PEARSON HEATMAP MODULE ---
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🌐 GLOBAL LIQUIDITY PHYSICS (CROSS-ASSET PEARSON MATRIX)</div>", unsafe_allow_html=True)
     with st.spinner("Calculating 90-Day Rolling Cross-Asset Correlations..."):
         matrix_res = get_cross_asset_matrix()
         if matrix_res['status'] == 'online':
             corr_df = matrix_res['data']
             
-            # Custom dark-theme compatible colorscale
             custom_colorscale = [
-                [0.0, '#FF4444'],  # Strong Negative (Red)
-                [0.5, '#161b22'],  # Neutral (Dark Background)
-                [1.0, '#39FF14']   # Strong Positive (Neon Green)
+                [0.0, '#FF4444'],
+                [0.5, '#161b22'],
+                [1.0, '#39FF14'] 
             ]
             
             fig_hm = go.Figure(data=go.Heatmap(
@@ -777,31 +706,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     fig_o.update_xaxes(showgrid=False, zeroline=False)
                     st.plotly_chart(fig_o, width="stretch", key="options_chart")
             else: st.error(f"Options Flow Engine Offline: {skew_data.get('error', 'Unknown')}")
-
-    r_col1, r_col2 = st.columns([1, 1], gap="large")
-    with r_col1:
-        st.markdown("<div class='apex-header' style='margin-top: 20px;'>⚡ KINETIC RADAR (LIVE BREAKOUTS)</div>", unsafe_allow_html=True)
-        with st.spinner("Scanning Lieutenants for volume ignition..."):
-            radar_df = run_kinetic_radar()
-            if not radar_df.empty: 
-                st.dataframe(radar_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Dist to High (%)": "{:+.2f}%", "Vol Spike (x)": "{:.2f}x", "Price": "${:.2f}"}), width="stretch", height=200)
-            else: 
-                st.info("No Lieutenants meeting kinetic volume thresholds today.")
-
-    with r_col2:
-        st.markdown("<div class='apex-header' style='margin-top: 20px;'>🦇 DARK POOLS & INSIDER BLOCKS</div>", unsafe_allow_html=True)
-        tabs = st.tabs(["Dark Pool Compression", "C-Suite Insider Matrix"])
-        with tabs[0]:
-            with st.spinner("Scanning Institutional Anomalies..."):
-                dp_df = run_dark_pool_radar()
-                if not dp_df.empty: 
-                    st.dataframe(dp_df.sort_values(by="Vol Spike (x)", ascending=False).style.format({"Vol Spike (x)": "{:.2f}x", "Price Compression": "{:.2f}x", "Price": "${:.2f}"}), width="stretch", height=200)
-                else: 
-                    st.info("No Dark Pool signatures detected today.")
-        with tabs[1]:
-            with st.spinner("Scraping SEC Form 4 Proxies..."):
-                insider_df = get_insider_signals()
-                st.dataframe(insider_df, width="stretch", height=200)
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES vs BREADTH)</div>", unsafe_allow_html=True)
     rot_col1, rot_col2 = st.columns([1, 1], gap="large")

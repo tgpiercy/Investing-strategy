@@ -1,75 +1,56 @@
 # FILE: apex_config.py
-# ROLE: Master Configuration & Radar Parameters
-# ARCHITECTURE: Global Variable Engine & Dynamic Universe Aggregation
+# ROLE: Master Configuration Dictionary
+# ARCHITECTURE: Titan Omega V5.37 (Macro-Thematic Roster)
 
 # ==============================================================================
-# 1. THE TARGET UNIVERSES (Cascading Matrix)
+# API KEYS & SECURITY
 # ==============================================================================
-
-MACRO_ASSETS = [
-    "SPY", "QQQ", "IWM", "DIA", # Core Equities
-    "USO", "GLD", "SLV", "DBC", # Commodities
-    "TLT", "UUP"                # Bonds & Dollar
-]
-
-SECTORS = [
-    "XLK", # Tech
-    "XLF", # Financials
-    "XLV", # Healthcare
-    "XLE", # Energy
-    "XLY", # Consumer Discretionary
-    "XLI", # Industrials
-    "XLP", # Consumer Staples
-    "XLU", # Utilities
-    "XLB", # Materials
-    "XLRE" # Real Estate
-]
-
-SUBSECTORS = [
-    "SMH",  # Semiconductors (Highly Liquid)
-    "XBI",  # Biotech (Speculative Risk Proxy)
-    "KRE",  # Regional Banks (Domestic Credit Health)
-    "ITB",  # Homebuilders (Interest Rate Sensitivity)
-    "XOP",  # Oil & Gas Exploration
-    "OIH",  # Oil Services
-    "XRT",  # Retail
-    "IYT",  # Transports (Dow Theory)
-    "ITA",  # Aerospace & Defense
-    "CIBR", # Cybersecurity
-    "URA",  # Uranium / Nuclear
-    "COPX", # Copper Miners (Global Growth Proxy)
-    "GDX"   # Gold Miners
-]
-
-# The AI Supply Chain Matrix
-AI_THEMATIC = [
-    "NVDA", "AMD",          # Tier 1: Core Compute GPUs
-    "AVGO", "MRVL",         # Tier 2: Custom Silicon & ASICs
-    "ANET", "COHR", "LITE", # Tier 3: Networking & Photonics/Optics
-    "MU", "WDC",            # Tier 4: High Bandwidth Memory & Storage
-    "TSM", "ASML", "AMAT",  # Tier 5: Foundries & CapEx Equipment
-    "VRT", "ETN",           # Tier 6: Power, Liquid Cooling, Infrastructure
-    "PLTR", "ARM", "CRWD"   # Tier 7: Data, IP, & Endpoint Security
-]
-
-CRYPTO_THEMATIC = [
-    "IBIT", # Bitcoin Spot Proxy
-    "MSTR", # Corporate Treasury Proxy
-    "COIN", # Exchange/Infrastructure
-    "MARA"  # Miners
-]
-
-# ==============================================================================
-# 2. DYNAMIC AGGREGATION (The Lieutenants)
-# ==============================================================================
-# Automatically compiles all unique tickers above into the master radar scan list.
-_all_targets = MACRO_ASSETS + SECTORS + SUBSECTORS + AI_THEMATIC + CRYPTO_THEMATIC
-LIEUTENANTS = list(dict.fromkeys(_all_targets)) # Removes duplicates automatically
-
-# ==============================================================================
-# 3. RADAR PARAMETERS
-# ==============================================================================
-MIN_DONCHIAN_PROX = -2.0 
-MIN_VOLUME_SPIKE = 1.5
-
+# Generate free key here: https://fred.stlouisfed.org/docs/api/api_key.html
 FRED_API_KEY = "50ff1e637effabba2fe09afee01aae98"
+
+# ==============================================================================
+# QUANTITATIVE THRESHOLDS
+# ==============================================================================
+MIN_VOLUME_SPIKE = 1.2    # Kinetic Ignition: Volume must be 20% higher than 20-day avg
+MIN_DONCHIAN_PROX = -2.0  # Max distance from 40-day high to be considered a valid breakout (%)
+
+# ==============================================================================
+# RRG UNIVERSE CONFIGURATIONS (RELATIVE ROTATION GRAPHS)
+# ==============================================================================
+MACRO_ASSETS = ["SPY", "QQQ", "IWM", "TLT", "GLD", "USO", "UUP", "DBC", "IEMG", "INDA"]
+SECTORS = ["XLE", "XLF", "XLU", "XLI", "XLRE", "XLV", "XLP", "XLY", "XLC", "XLK", "XLB"]
+SUBSECTORS = ["SMH", "XOP", "KRE", "XBI", "XHB", "URA", "NLR", "ICLN", "QCLN"]
+AI_THEMATIC = ["NVDA", "AMD", "MSFT", "GOOGL", "META", "AMZN", "TSM", "AVGO", "BOTZ", "ROBO", "AIQ", "CHAT", "AINF", "SRVR"]
+CRYPTO_THEMATIC = ["BTC-USD", "ETH-USD", "MSTR", "COIN", "MARA"]
+
+# ==============================================================================
+# THE MASTER LIEUTENANTS ROSTER (GLOBAL SCREENER UNIVERSE)
+# ==============================================================================
+# This list feeds the 'Titan Master Screener' and 'Tactical Recon' modules.
+# It contains highly liquid, institutional-grade proxies across all thematic vectors.
+
+LIEUTENANTS = [
+    # Broad Market & Macro
+    "SPY", "QQQ", "IWM", 
+    
+    # Energy & Power (Inflation Hedges)
+    "XLE", "VDE", 
+    
+    # Clean Energy & Nuclear (Baseload & Policy)
+    "ICLN", "QCLN", "URA", "NLR",
+    
+    # Physical AI (Robotics & Automation)
+    "BOTZ", "ROBO",
+    
+    # Virtual AI (Software & GenAI)
+    "AIQ", "CHAT",
+    
+    # AI Infrastructure (Picks & Shovels & Real Estate)
+    "SMH", "AINF", "SRVR",
+    
+    # Emerging Markets (Global Beta)
+    "IEMG", "INDA",
+    
+    # Key Mega-Caps (High Beta Alpha)
+    "NVDA", "AMD", "MSFT", "AMZN", "META", "GOOGL", "AAPL", "TSLA"
+]

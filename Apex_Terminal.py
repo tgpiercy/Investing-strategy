@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.37 + Redundancy Pruned)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.38 + Whale Hunter)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.37<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.38<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -70,6 +70,62 @@ def get_risk_engine():
         vix3m = float(data['^VIX3M'].iloc[-1])
         return {"vix": vix, "vix3m": vix3m, "ratio": vix / vix3m, "status": "online"}
     except Exception as e: return {"status": "offline", "error": str(e)}
+
+@st.cache_data(ttl=86400)
+def get_fomc_data():
+    try:
+        if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
+            return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
+
+        api_key = cfg.FRED_API_KEY
+        
+        yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
+        res_yc = requests.get(yc_url, timeout=10)
+        if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
+        
+        df_yc = pd.DataFrame(res_yc.json()['observations'])
+        df_yc['date'] = pd.to_datetime(df_yc['date'])
+        df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
+        df_yc = df_yc[['date', 'value']].rename(columns={'value': 'Yield_Curve'}).set_index('date')
+
+        ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
+        res_ff = requests.get(ff_url, timeout=10)
+        if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
+        
+        df_ff = pd.DataFrame(res_ff.json()['observations'])
+        df_ff['date'] = pd.to_datetime(df_ff['date'])
+        df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
+        df_ff = df_ff[['date', 'value']].rename(columns={'value': 'Fed_Funds'}).set_index('date')
+
+        df = df_yc.join(df_ff, how='inner').dropna()
+        df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
+        
+        if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
+        
+        status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
+        return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
+        
+    except Exception as e:
+        return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
+
+@st.cache_data(ttl=3600)
+def get_cross_asset_matrix():
+    tickers = ["SPY", "QQQ", "TLT", "GLD", "USO", "UUP", "BTC-USD"]
+    try:
+        df = yf.download(tickers, period="3mo", progress=False)['Close']
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
+        df = df.dropna(how='all')
+        
+        returns = df.pct_change().dropna()
+        if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
+        
+        corr_matrix = returns.corr().round(2)
+        valid_tickers = [t for t in tickers if t in corr_matrix.columns]
+        corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
+        
+        return {"status": "online", "data": corr_matrix}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def get_macro_tide():
@@ -151,62 +207,6 @@ def get_gamma_walls():
         except: pass
     return results
 
-@st.cache_data(ttl=86400)
-def get_fomc_data():
-    try:
-        if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
-            return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
-
-        api_key = cfg.FRED_API_KEY
-        
-        yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
-        res_yc = requests.get(yc_url, timeout=10)
-        if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
-        
-        df_yc = pd.DataFrame(res_yc.json()['observations'])
-        df_yc['date'] = pd.to_datetime(df_yc['date'])
-        df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
-        df_yc = df_yc[['date', 'value']].rename(columns={'value': 'Yield_Curve'}).set_index('date')
-
-        ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
-        res_ff = requests.get(ff_url, timeout=10)
-        if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
-        
-        df_ff = pd.DataFrame(res_ff.json()['observations'])
-        df_ff['date'] = pd.to_datetime(df_ff['date'])
-        df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
-        df_ff = df_ff[['date', 'value']].rename(columns={'value': 'Fed_Funds'}).set_index('date')
-
-        df = df_yc.join(df_ff, how='inner').dropna()
-        df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
-        
-        if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
-        
-        status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
-        return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
-        
-    except Exception as e:
-        return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
-
-@st.cache_data(ttl=3600)
-def get_cross_asset_matrix():
-    tickers = ["SPY", "QQQ", "TLT", "GLD", "USO", "UUP", "BTC-USD"]
-    try:
-        df = yf.download(tickers, period="3mo", progress=False)['Close']
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
-        df = df.dropna(how='all')
-        
-        returns = df.pct_change().dropna()
-        if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
-        
-        corr_matrix = returns.corr().round(2)
-        valid_tickers = [t for t in tickers if t in corr_matrix.columns]
-        corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
-        
-        return {"status": "online", "data": corr_matrix}
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
-
 @st.cache_data(ttl=3600)
 def run_credit_stress_engine():
     try:
@@ -278,6 +278,54 @@ def get_options_flow_chart_data(live_pcr, ticker="SPY"):
         return df.tail(120)
     except Exception:
         return None
+
+@st.cache_data(ttl=900)
+def run_whale_hunter():
+    """V5.38 MACRO PHYSICS: Volume Swing & Cluster Accumulation Scanner"""
+    results = []
+    for ticker in cfg.LIEUTENANTS:
+        try:
+            df = yf.download(ticker, period="3mo", progress=False)
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+            df = df.dropna()
+            if df.empty or len(df) < 25: continue
+            
+            df['Vol_20SMA'] = df['Volume'].rolling(20).mean()
+            df['Rel_Vol'] = df['Volume'] / df['Vol_20SMA']
+            df['Up_Day'] = df['Close'] > df['Open']
+            df['Close_Pos'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 0.0001) 
+            
+            last_2_days = df.tail(2)
+            whale_block = False
+            for _, row in last_2_days.iterrows():
+                if row['Rel_Vol'] >= 2.5 and row['Up_Day'] and row['Close_Pos'] >= 0.7:
+                    whale_block = True
+            
+            last_10 = df.tail(10)
+            acc_days = last_10[(last_10['Rel_Vol'] > 1.2) & (last_10['Up_Day'])]
+            dist_days = last_10[(last_10['Rel_Vol'] > 1.2) & (~last_10['Up_Day'])]
+            
+            cluster_acc = False
+            if len(acc_days) >= 3 and len(dist_days) <= 1:
+                cluster_acc = True
+                
+            if whale_block or cluster_acc:
+                if whale_block and cluster_acc: sig = "☢️ APEX: WHALE + CLUSTER"
+                elif whale_block: sig = "🐋 WHALE BLOCK (SINGLE)"
+                else: sig = "🔥 CLUSTER ACCUMULATION"
+                
+                c = float(df['Close'].iloc[-1])
+                v_spike = float(df['Rel_Vol'].iloc[-1])
+                
+                results.append({
+                    "Ticker": ticker,
+                    "Signature": sig,
+                    "Price": f"${c:.2f}",
+                    "Today's Vol": f"{v_spike:.1f}x",
+                    "Acc Days (10d)": f"{len(acc_days)} Days"
+                })
+        except: pass
+    return pd.DataFrame(results)
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
@@ -706,6 +754,15 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     fig_o.update_xaxes(showgrid=False, zeroline=False)
                     st.plotly_chart(fig_o, width="stretch", key="options_chart")
             else: st.error(f"Options Flow Engine Offline: {skew_data.get('error', 'Unknown')}")
+
+    # --- V5.38 WHALE HUNTER MODULE ---
+    st.markdown("<div class='apex-header' style='margin-top: 40px;'>🐋 WHALE HUNTER (INSTITUTIONAL VOLUME SWINGS)</div>", unsafe_allow_html=True)
+    with st.spinner("Hunting massive institutional block trades & accumulation clusters..."):
+        whale_df = run_whale_hunter()
+        if not whale_df.empty: 
+            st.dataframe(whale_df.sort_values(by="Today's Vol", ascending=False), width="stretch", hide_index=True)
+        else: 
+            st.info("No Whale Blocks or Cluster Accumulation detected across the Lieutenants roster today.")
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES vs BREADTH)</div>", unsafe_allow_html=True)
     rot_col1, rot_col2 = st.columns([1, 1], gap="large")

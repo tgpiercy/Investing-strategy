@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.39 + Unified Screener)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.40 + Kinetic Gamma Flow)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.39<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.40<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -158,8 +158,10 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
+    """V5.40 KINETIC GAMMA ENGINE: Scans Volume vs OI and localized PCR"""
     results = []
-    for ticker in ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA"]:
+    target_tickers = ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA", "SMH", "XLE"]
+    for ticker in target_tickers:
         try:
             df = yf.download(ticker, period="5d", progress=False)
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
@@ -172,37 +174,57 @@ def get_gamma_walls():
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
             
-            calls = chain.calls.sort_values(by='openInterest', ascending=False)
-            puts = chain.puts.sort_values(by='openInterest', ascending=False)
+            calls = chain.calls
+            puts = chain.puts
             if calls.empty or puts.empty: continue
+            
+            # Ticker-Specific PCR
+            total_call_oi = calls['openInterest'].sum()
+            total_put_oi = puts['openInterest'].sum()
+            pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
+
+            calls_sorted = calls.sort_values(by='openInterest', ascending=False)
+            puts_sorted = puts.sort_values(by='openInterest', ascending=False)
                 
-            c_wall_1 = calls.iloc[0]['strike']
-            c_wall_1_oi = calls.iloc[0]['openInterest']
-            c_wall_2 = calls.iloc[1]['strike'] if len(calls) > 1 else c_wall_1
-            c_wall_2_oi = calls.iloc[1]['openInterest'] if len(calls) > 1 else c_wall_1_oi
+            c_wall_1 = calls_sorted.iloc[0]['strike']
+            c_wall_1_oi = calls_sorted.iloc[0]['openInterest']
+            c_wall_1_vol = calls_sorted.iloc[0]['volume']
+            c1_active = c_wall_1_vol > c_wall_1_oi
             
-            p_wall_1 = puts.iloc[0]['strike']
-            p_wall_1_oi = puts.iloc[0]['openInterest']
-            p_wall_2 = puts.iloc[1]['strike'] if len(puts) > 1 else p_wall_1
-            p_wall_2_oi = puts.iloc[1]['openInterest'] if len(puts) > 1 else p_wall_1_oi
+            c_wall_2 = calls_sorted.iloc[1]['strike'] if len(calls_sorted) > 1 else c_wall_1
+            c_wall_2_oi = calls_sorted.iloc[1]['openInterest'] if len(calls_sorted) > 1 else c_wall_1_oi
+            c_wall_2_vol = calls_sorted.iloc[1]['volume'] if len(calls_sorted) > 1 else c_wall_1_vol
+            c2_active = c_wall_2_vol > c_wall_2_oi
             
-            merged = pd.merge(chain.calls[['strike', 'openInterest']], chain.puts[['strike', 'openInterest']], on='strike', how='outer').fillna(0)
+            p_wall_1 = puts_sorted.iloc[0]['strike']
+            p_wall_1_oi = puts_sorted.iloc[0]['openInterest']
+            p_wall_1_vol = puts_sorted.iloc[0]['volume']
+            p1_active = p_wall_1_vol > p_wall_1_oi
+            
+            p_wall_2 = puts_sorted.iloc[1]['strike'] if len(puts_sorted) > 1 else p_wall_1
+            p_wall_2_oi = puts_sorted.iloc[1]['openInterest'] if len(puts_sorted) > 1 else p_wall_1_oi
+            p_wall_2_vol = puts_sorted.iloc[1]['volume'] if len(puts_sorted) > 1 else p_wall_1_vol
+            p2_active = p_wall_2_vol > p_wall_2_oi
+            
+            merged = pd.merge(calls[['strike', 'openInterest']], puts[['strike', 'openInterest']], on='strike', how='outer').fillna(0)
             merged['total_oi'] = merged['openInterest_x'] + merged['openInterest_y']
             zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
 
             if c_wall_1 > c_wall_2: 
                 c_wall_1, c_wall_2 = c_wall_2, c_wall_1
                 c_wall_1_oi, c_wall_2_oi = c_wall_2_oi, c_wall_1_oi
+                c1_active, c2_active = c2_active, c1_active
             if p_wall_1 < p_wall_2: 
                 p_wall_1, p_wall_2 = p_wall_2, p_wall_1
                 p_wall_1_oi, p_wall_2_oi = p_wall_2_oi, p_wall_1_oi
+                p1_active, p2_active = p2_active, p1_active
 
             results.append({
-                "Ticker": ticker, "Price": px, "Zero Gamma": zero_gamma,
-                "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi,
-                "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, "CW2_OI": c_wall_2_oi,
-                "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100, "PW1_OI": p_wall_1_oi,
-                "Put Wall 2": p_wall_2, "Dist PW2": ((px - p_wall_2) / px) * 100, "PW2_OI": p_wall_2_oi
+                "Ticker": ticker, "Price": px, "Zero Gamma": zero_gamma, "PCR": pcr,
+                "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi, "CW1_Active": c1_active,
+                "Call Wall 2": c_wall_2, "Dist CW2": ((c_wall_2 - px) / px) * 100, "CW2_OI": c_wall_2_oi, "CW2_Active": c2_active,
+                "Put Wall 1": p_wall_1, "Dist PW1": ((px - p_wall_1) / px) * 100, "PW1_OI": p_wall_1_oi, "PW1_Active": p1_active,
+                "Put Wall 2": p_wall_2, "Dist PW2": ((px - p_wall_2) / px) * 100, "PW2_OI": p_wall_2_oi, "PW2_Active": p2_active
             })
         except: pass
     return results
@@ -672,36 +694,49 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>{row['Asset']}</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>BIAS:</span><span style='color:{tc}; font-weight:bold;'>{'NET LONG' if l else 'NET SHORT'} ({i:.1f}%)</span></div></div></div><div class='mandate-box {mc}'>[ {m} ]</div></div>", unsafe_allow_html=True)
 
     with col2:
-        st.markdown("<div class='apex-header' style='margin-top: 20px;'>☢️ DEALER MATRIX (MULTI-TIER GAMMA)</div>", unsafe_allow_html=True)
-        with st.spinner("Scanning Institutional Options Chains..."):
-            for g in get_gamma_walls():
-                zg = g['Zero Gamma']
-                c1, c2 = g['Call Wall 1'], g['Call Wall 2']
-                p1, p2 = g['Put Wall 1'], g['Put Wall 2']
-                px = g['Price']
+        st.markdown("<div class='apex-header' style='margin-top: 20px;'>☢️ DEALER MATRIX (LIVE GAMMA FLOW)</div>", unsafe_allow_html=True)
+        with st.spinner("Scanning Institutional Options Chains & Kinetic Flow..."):
+            gamma_data = get_gamma_walls()
+            if not gamma_data:
+                st.info("No options data available at this time.")
+            else:
+                for g in gamma_data:
+                    zg = g['Zero Gamma']
+                    c1, c2 = g['Call Wall 1'], g['Call Wall 2']
+                    p1, p2 = g['Put Wall 1'], g['Put Wall 2']
+                    px = g['Price']
+                    pcr = g['PCR']
 
-                if px >= zg:
-                    vol_state = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>"
-                    cc_main = "card-neutral"
-                else:
-                    vol_state = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>"
-                    cc_main = "card-bearish"
+                    if px >= zg:
+                        vol_state = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>"
+                        cc_main = "card-neutral"
+                    else:
+                        vol_state = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>"
+                        cc_main = "card-bearish"
+                        
+                    # Active Flow Tags
+                    c1_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('CW1_Active') else ""
+                    c2_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('CW2_Active') else ""
+                    p1_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('PW1_Active') else ""
+                    p2_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('PW2_Active') else ""
 
-                st.markdown(f"""
-                <div class='tactical-card {cc_main}'>
-                    <div style='display:flex; justify-content:space-between; align-items:center;'>
-                        <div class='asset-title'>{g['Ticker']} <span style='font-size:0.8rem; color:#8b949e;'>${px:.2f}</span></div>
-                        <div style='font-size:0.85rem; font-weight:bold;'>{vol_state}</div>
+                    pcr_color = "#FF4444" if pcr > 1.2 else "#39FF14" if pcr < 0.8 else "#8b949e"
+
+                    st.markdown(f"""
+                    <div class='tactical-card {cc_main}'>
+                        <div style='display:flex; justify-content:space-between; align-items:center;'>
+                            <div class='asset-title'>{g['Ticker']} <span style='font-size:0.8rem; color:#8b949e;'>${px:.2f}</span></div>
+                            <div style='font-size:0.85rem; font-weight:bold;'>{vol_state} <span style='color:{pcr_color}; margin-left:10px;'>| PCR: {pcr:.2f}</span></div>
+                        </div>
+                        <div class='metric-sub' style='margin-top:10px;'>
+                            <div class='data-row'><span>T2 Call (Squeeze Target): <b style='color:#FFAA00;'>${c2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW2_OI']):,})</span>{c2_tag}</span><span>{g['Dist CW2']:+.1f}%</span></div>
+                            <div class='data-row'><span>T1 Call (Primary Ceiling): <b style='color:#FFF;'>${c1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW1_OI']):,})</span>{c1_tag}</span><span>{g['Dist CW1']:+.1f}%</span></div>
+                            <div class='data-row' style='background:rgba(255,255,255,0.05); padding:2px 5px;'><span>Zero-Gamma (Volatility Flip): <b style='color:#58a6ff;'>${zg:.2f}</b></span><span>{((zg-px)/px)*100:+.1f}%</span></div>
+                            <div class='data-row'><span>T1 Put (Primary Floor): <b style='color:#FFF;'>${p1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW1_OI']):,})</span>{p1_tag}</span><span>{g['Dist PW1']:+.1f}%</span></div>
+                            <div class='data-row'><span>T2 Put (The Abyss): <b style='color:#FF4444;'>${p2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW2_OI']):,})</span>{p2_tag}</span><span>{g['Dist PW2']:+.1f}%</span></div>
+                        </div>
                     </div>
-                    <div class='metric-sub' style='margin-top:10px;'>
-                        <div class='data-row'><span>T2 Call (Squeeze Target): <b style='color:#FFAA00;'>${c2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW2_OI']):,})</span></span><span>{g['Dist CW2']:+.1f}%</span></div>
-                        <div class='data-row'><span>T1 Call (Primary Ceiling): <b style='color:#FFF;'>${c1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['CW1_OI']):,})</span></span><span>{g['Dist CW1']:+.1f}%</span></div>
-                        <div class='data-row' style='background:rgba(255,255,255,0.05); padding:2px 5px;'><span>Zero-Gamma (Volatility Flip): <b style='color:#58a6ff;'>${zg:.2f}</b></span><span>{((zg-px)/px)*100:+.1f}%</span></div>
-                        <div class='data-row'><span>T1 Put (Primary Floor): <b style='color:#FFF;'>${p1:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW1_OI']):,})</span></span><span>{g['Dist PW1']:+.1f}%</span></div>
-                        <div class='data-row'><span>T2 Put (The Abyss): <b style='color:#FF4444;'>${p2:.2f}</b> <span style='font-size:0.75rem; color:#8b949e;'>(Mass: {int(g['PW2_OI']):,})</span></span><span>{g['Dist PW2']:+.1f}%</span></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🏦 INSTITUTIONAL CREDIT & VOLATILITY</div>", unsafe_allow_html=True)
     c_col1, c_col2 = st.columns([1, 1], gap="large")
@@ -811,7 +846,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         with st.spinner("Compiling cross-asset vector data & institutional footprints..."):
             screen_df = run_master_screener()
             if not screen_df.empty:
-                # Format to prioritize massive volume signatures
                 st.dataframe(screen_df.sort_values(by="Vol Spike (x)", ascending=False), width="stretch", hide_index=True)
             else:
                 st.info("No actionable Tier 1, Stealth setups, or Whale Blocks detected across the universe today.")

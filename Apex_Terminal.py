@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.38 + Whale Hunter)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.39 + Unified Screener)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.38<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.39<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -279,54 +279,6 @@ def get_options_flow_chart_data(live_pcr, ticker="SPY"):
     except Exception:
         return None
 
-@st.cache_data(ttl=900)
-def run_whale_hunter():
-    """V5.38 MACRO PHYSICS: Volume Swing & Cluster Accumulation Scanner"""
-    results = []
-    for ticker in cfg.LIEUTENANTS:
-        try:
-            df = yf.download(ticker, period="3mo", progress=False)
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-            df = df.dropna()
-            if df.empty or len(df) < 25: continue
-            
-            df['Vol_20SMA'] = df['Volume'].rolling(20).mean()
-            df['Rel_Vol'] = df['Volume'] / df['Vol_20SMA']
-            df['Up_Day'] = df['Close'] > df['Open']
-            df['Close_Pos'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 0.0001) 
-            
-            last_2_days = df.tail(2)
-            whale_block = False
-            for _, row in last_2_days.iterrows():
-                if row['Rel_Vol'] >= 2.5 and row['Up_Day'] and row['Close_Pos'] >= 0.7:
-                    whale_block = True
-            
-            last_10 = df.tail(10)
-            acc_days = last_10[(last_10['Rel_Vol'] > 1.2) & (last_10['Up_Day'])]
-            dist_days = last_10[(last_10['Rel_Vol'] > 1.2) & (~last_10['Up_Day'])]
-            
-            cluster_acc = False
-            if len(acc_days) >= 3 and len(dist_days) <= 1:
-                cluster_acc = True
-                
-            if whale_block or cluster_acc:
-                if whale_block and cluster_acc: sig = "☢️ APEX: WHALE + CLUSTER"
-                elif whale_block: sig = "🐋 WHALE BLOCK (SINGLE)"
-                else: sig = "🔥 CLUSTER ACCUMULATION"
-                
-                c = float(df['Close'].iloc[-1])
-                v_spike = float(df['Rel_Vol'].iloc[-1])
-                
-                results.append({
-                    "Ticker": ticker,
-                    "Signature": sig,
-                    "Price": f"${c:.2f}",
-                    "Today's Vol": f"{v_spike:.1f}x",
-                    "Acc Days (10d)": f"{len(acc_days)} Days"
-                })
-        except: pass
-    return pd.DataFrame(results)
-
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
     try:
@@ -359,6 +311,7 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
 
 @st.cache_data(ttl=900)
 def run_master_screener():
+    """V5.39 UNIFIED GLOBAL SCAN: Consolidates Whale, Dark Pool, and Kinetic into one master table."""
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
@@ -370,23 +323,57 @@ def run_master_screener():
             
             c, v = float(df['Close'].iloc[-1]), float(df['Volume'].iloc[-1])
             sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
-            ema_9, ema_21 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1]), float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
-            vol_sma_9, vol_sma_20, vol_sma_50 = float(df['Volume'].rolling(9).mean().iloc[-1]), float(df['Volume'].rolling(20).mean().iloc[-1]), float(df['Volume'].rolling(50).mean().iloc[-1])
-            atr_20 = float((df['High'] - df['Low']).rolling(20).mean().iloc[-1])
-            rng = float(df['High'].iloc[-1] - df['Low'].iloc[-1])
+            ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
+            ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
             
+            df['Vol_SMA_20'] = df['Volume'].rolling(20).mean()
+            vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
+            vol_sma_20 = float(df['Vol_SMA_20'].iloc[-1])
+            vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
+            
+            df['Range'] = df['High'] - df['Low']
+            df['ATR_20'] = df['Range'].rolling(20).mean()
+            atr_20 = float(df['ATR_20'].iloc[-1])
+            rng = float(df['Range'].iloc[-1])
+            
+            df['Rel_Vol'] = df['Volume'] / (df['Vol_SMA_20'] + 1)
+            df['Up_Day'] = df['Close'] > df['Open']
+            df['Close_Pos'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 0.0001) 
+            
+            # --- Dark Pool / System Scores ---
             trend, mom, liq = c > sma_50, ema_9 > ema_21, vol_sma_9 > vol_sma_50
             dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
             dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
-            
             score = sum([trend, mom, liq, dp_vol, dp_comp])
-            if score == 5: cat = "🔥 TIER 1: PERFECT SETUP"
-            elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH ACCUMULATION"
+            
+            # --- Whale Hunter Physics ---
+            last_2 = df.tail(2)
+            whale_block = any((row['Rel_Vol'] >= 2.5 and row['Up_Day'] and row['Close_Pos'] >= 0.7) for _, row in last_2.iterrows())
+            
+            last_10 = df.tail(10)
+            acc_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (last_10['Up_Day'])])
+            dist_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (~last_10['Up_Day'])])
+            cluster_acc = acc_days >= 3 and dist_days <= 1
+            
+            # --- Hierarchy of Signals ---
+            if whale_block and cluster_acc: cat = "☢️ WHALE + CLUSTER"
+            elif whale_block: cat = "🐋 WHALE BLOCK"
+            elif cluster_acc: cat = "🔥 CLUSTER ACCUMULATION"
+            elif score == 5: cat = "🔥 PERFECT TIER 1"
+            elif dp_vol and dp_comp and not trend: cat = "🦇 STEALTH (DARK POOL)"
             elif mom and liq: cat = "🚀 KINETIC BREAKOUT"
             else: cat = "STANDBY"
             
             if cat != "STANDBY":
-                results.append({"Ticker": ticker, "Price": f"${c:.2f}", "Titan Score": f"{score}/5", "Category": cat, "Volume": f"{v/vol_sma_20:.1f}x", "Compression": f"{rng/atr_20:.2f}x"})
+                results.append({
+                    "Ticker": ticker, 
+                    "Price": f"${c:.2f}", 
+                    "Category": cat,
+                    "Vol Spike (x)": f"{v/vol_sma_20:.1f}x" if vol_sma_20 > 0 else "0.0x",
+                    "Acc Days (10d)": f"{acc_days}",
+                    "Compression (x)": f"{rng/atr_20:.2f}x" if atr_20 > 0 else "0.00x",
+                    "Titan Score": f"{score}/5"
+                })
         except Exception: pass
     return pd.DataFrame(results)
 
@@ -755,15 +742,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     st.plotly_chart(fig_o, width="stretch", key="options_chart")
             else: st.error(f"Options Flow Engine Offline: {skew_data.get('error', 'Unknown')}")
 
-    # --- V5.38 WHALE HUNTER MODULE ---
-    st.markdown("<div class='apex-header' style='margin-top: 40px;'>🐋 WHALE HUNTER (INSTITUTIONAL VOLUME SWINGS)</div>", unsafe_allow_html=True)
-    with st.spinner("Hunting massive institutional block trades & accumulation clusters..."):
-        whale_df = run_whale_hunter()
-        if not whale_df.empty: 
-            st.dataframe(whale_df.sort_values(by="Today's Vol", ascending=False), width="stretch", hide_index=True)
-        else: 
-            st.info("No Whale Blocks or Cluster Accumulation detected across the Lieutenants roster today.")
-
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔄 MACRO ROTATION & RRG (EQUITIES vs COMMODITIES vs BREADTH)</div>", unsafe_allow_html=True)
     rot_col1, rot_col2 = st.columns([1, 1], gap="large")
 
@@ -825,16 +803,18 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             else:
                 st.error(f"RRG Engine Offline: {rrg_engine.get('error', 'Unknown Error')}")
 
-    st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTER SCREENER (ALL LIEUTENANTS)</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized scan of the dynamic configuration universe.</p>", unsafe_allow_html=True)
+    # --- V5.39 UNIFIED MASTER SCREENER ---
+    st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTER SCREENER (UNIFIED GLOBAL SCAN)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized 5-Factor scan across the Lieutenants universe, incorporating Whale Blocks and Accumulation Clusters.</p>", unsafe_allow_html=True)
 
     if st.button("EXECUTE GLOBAL SCAN"):
-        with st.spinner("Compiling cross-asset vector data..."):
+        with st.spinner("Compiling cross-asset vector data & institutional footprints..."):
             screen_df = run_master_screener()
             if not screen_df.empty:
-                st.dataframe(screen_df.sort_values(by="Titan Score", ascending=False), width="stretch", hide_index=True)
+                # Format to prioritize massive volume signatures
+                st.dataframe(screen_df.sort_values(by="Vol Spike (x)", ascending=False), width="stretch", hide_index=True)
             else:
-                st.info("No actionable Tier 1 or Stealth setups detected across the universe today.")
+                st.info("No actionable Tier 1, Stealth setups, or Whale Blocks detected across the universe today.")
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RECON & DECODER</div>", unsafe_allow_html=True)
     recon_col1, recon_col2 = st.columns([1, 4], gap="medium")

@@ -1,6 +1,6 @@
 # FILE: apex_config.py
 # ROLE: Master Configuration Dictionary
-# ARCHITECTURE: Titan Omega V5.37 (Macro-Thematic Roster)
+# ARCHITECTURE: Titan Omega V5.40 (Subsector Roster Expanded)
 
 # ==============================================================================
 # API KEYS & SECURITY
@@ -19,7 +19,10 @@ MIN_DONCHIAN_PROX = -2.0  # Max distance from 40-day high to be considered a val
 # ==============================================================================
 MACRO_ASSETS = ["SPY", "QQQ", "IWM", "TLT", "GLD", "USO", "UUP", "DBC", "IEMG", "INDA"]
 SECTORS = ["XLE", "XLF", "XLU", "XLI", "XLRE", "XLV", "XLP", "XLY", "XLC", "XLK", "XLB"]
-SUBSECTORS = ["SMH", "XOP", "KRE", "XBI", "XHB", "URA", "NLR", "ICLN", "QCLN"]
+
+# V5.40 Expanded Industry Breakdown
+SUBSECTORS = ["SMH", "IGV", "CIBR", "XBI", "KRE", "XHB", "IYT", "XOP", "XME", "ITA", "XRT"]
+
 AI_THEMATIC = ["NVDA", "AMD", "MSFT", "GOOGL", "META", "AMZN", "TSM", "AVGO", "BOTZ", "ROBO", "AIQ", "CHAT", "AINF", "SRVR"]
 CRYPTO_THEMATIC = ["BTC-USD", "ETH-USD", "MSTR", "COIN", "MARA"]
 
@@ -32,6 +35,9 @@ CRYPTO_THEMATIC = ["BTC-USD", "ETH-USD", "MSTR", "COIN", "MARA"]
 LIEUTENANTS = [
     # Broad Market & Macro
     "SPY", "QQQ", "IWM", 
+    
+    # Core Industries (The Subsectors)
+    "IGV", "CIBR", "KRE", "XHB", "IYT", "XOP", "XME", "ITA", "XRT", "XBI",
     
     # Energy & Power (Inflation Hedges)
     "XLE", "VDE", 

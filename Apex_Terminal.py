@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.40 + Kinetic Gamma Flow)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.41 + Quant Optimizer Lab)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -51,9 +51,9 @@ st.markdown("""
 
 # SIDEBAR NAVIGATION
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
-app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 BACKTESTER LAB"])
+app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 QUANT OPTIMIZER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.40<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.41<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -76,13 +76,10 @@ def get_fomc_data():
     try:
         if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
             return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
-
         api_key = cfg.FRED_API_KEY
-        
         yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
         res_yc = requests.get(yc_url, timeout=10)
         if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
-        
         df_yc = pd.DataFrame(res_yc.json()['observations'])
         df_yc['date'] = pd.to_datetime(df_yc['date'])
         df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
@@ -91,7 +88,6 @@ def get_fomc_data():
         ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
         res_ff = requests.get(ff_url, timeout=10)
         if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
-        
         df_ff = pd.DataFrame(res_ff.json()['observations'])
         df_ff['date'] = pd.to_datetime(df_ff['date'])
         df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
@@ -99,14 +95,11 @@ def get_fomc_data():
 
         df = df_yc.join(df_ff, how='inner').dropna()
         df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
-        
         if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
         
         status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
         return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
-        
-    except Exception as e:
-        return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
+    except Exception as e: return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
 
 @st.cache_data(ttl=3600)
 def get_cross_asset_matrix():
@@ -115,17 +108,13 @@ def get_cross_asset_matrix():
         df = yf.download(tickers, period="3mo", progress=False)['Close']
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
         df = df.dropna(how='all')
-        
         returns = df.pct_change().dropna()
         if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
-        
         corr_matrix = returns.corr().round(2)
         valid_tickers = [t for t in tickers if t in corr_matrix.columns]
         corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
-        
         return {"status": "online", "data": corr_matrix}
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
+    except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def get_macro_tide():
@@ -134,8 +123,7 @@ def get_macro_tide():
     try:
         response = requests.get(url, headers=headers, timeout=10)
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-            with z.open(z.namelist()[0]) as f:
-                df = pd.read_csv(f, low_memory=False)
+            with z.open(z.namelist()[0]) as f: df = pd.read_csv(f, low_memory=False)
         df.columns = df.columns.str.strip().str.upper()
         date_col = next(c for c in df.columns if 'REPORT_DATE' in c)
         market_col = next(c for c in df.columns if 'MARKET_AND_EXCHANGE' in c)
@@ -158,7 +146,6 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
-    """V5.40 KINETIC GAMMA ENGINE: Scans Volume vs OI and localized PCR"""
     results = []
     target_tickers = ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA", "SMH", "XLE"]
     for ticker in target_tickers:
@@ -168,48 +155,37 @@ def get_gamma_walls():
             df = df.dropna()
             if df.empty: continue
             px = float(df['Close'].iloc[-1])
-            
             tk = yf.Ticker(ticker)
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
-            
             calls = chain.calls
             puts = chain.puts
             if calls.empty or puts.empty: continue
-            
-            # Ticker-Specific PCR
             total_call_oi = calls['openInterest'].sum()
             total_put_oi = puts['openInterest'].sum()
             pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
-
             calls_sorted = calls.sort_values(by='openInterest', ascending=False)
             puts_sorted = puts.sort_values(by='openInterest', ascending=False)
-                
             c_wall_1 = calls_sorted.iloc[0]['strike']
             c_wall_1_oi = calls_sorted.iloc[0]['openInterest']
             c_wall_1_vol = calls_sorted.iloc[0]['volume']
             c1_active = c_wall_1_vol > c_wall_1_oi
-            
             c_wall_2 = calls_sorted.iloc[1]['strike'] if len(calls_sorted) > 1 else c_wall_1
             c_wall_2_oi = calls_sorted.iloc[1]['openInterest'] if len(calls_sorted) > 1 else c_wall_1_oi
             c_wall_2_vol = calls_sorted.iloc[1]['volume'] if len(calls_sorted) > 1 else c_wall_1_vol
             c2_active = c_wall_2_vol > c_wall_2_oi
-            
             p_wall_1 = puts_sorted.iloc[0]['strike']
             p_wall_1_oi = puts_sorted.iloc[0]['openInterest']
             p_wall_1_vol = puts_sorted.iloc[0]['volume']
             p1_active = p_wall_1_vol > p_wall_1_oi
-            
             p_wall_2 = puts_sorted.iloc[1]['strike'] if len(puts_sorted) > 1 else p_wall_1
             p_wall_2_oi = puts_sorted.iloc[1]['openInterest'] if len(puts_sorted) > 1 else p_wall_1_oi
             p_wall_2_vol = puts_sorted.iloc[1]['volume'] if len(puts_sorted) > 1 else p_wall_1_vol
             p2_active = p_wall_2_vol > p_wall_2_oi
-            
             merged = pd.merge(calls[['strike', 'openInterest']], puts[['strike', 'openInterest']], on='strike', how='outer').fillna(0)
             merged['total_oi'] = merged['openInterest_x'] + merged['openInterest_y']
             zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
-
             if c_wall_1 > c_wall_2: 
                 c_wall_1, c_wall_2 = c_wall_2, c_wall_1
                 c_wall_1_oi, c_wall_2_oi = c_wall_2_oi, c_wall_1_oi
@@ -218,7 +194,6 @@ def get_gamma_walls():
                 p_wall_1, p_wall_2 = p_wall_2, p_wall_1
                 p_wall_1_oi, p_wall_2_oi = p_wall_2_oi, p_wall_1_oi
                 p1_active, p2_active = p2_active, p1_active
-
             results.append({
                 "Ticker": ticker, "Price": px, "Zero Gamma": zero_gamma, "PCR": pcr,
                 "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi, "CW1_Active": c1_active,
@@ -235,27 +210,21 @@ def run_credit_stress_engine():
         df_hyg = yf.download("HYG", period="6mo", progress=False)
         df_ief = yf.download("IEF", period="6mo", progress=False)
         df_spy = yf.download("SPY", period="6mo", progress=False)
-        
         if isinstance(df_hyg.columns, pd.MultiIndex): df_hyg.columns = df_hyg.columns.droplevel(1)
         if isinstance(df_ief.columns, pd.MultiIndex): df_ief.columns = df_ief.columns.droplevel(1)
         if isinstance(df_spy.columns, pd.MultiIndex): df_spy.columns = df_spy.columns.droplevel(1)
-        
         c_hyg, c_ief, c_spy = df_hyg['Close'].dropna(), df_ief['Close'].dropna(), df_spy['Close'].dropna()
         if c_hyg.empty or c_ief.empty or c_spy.empty: return {"status": "offline", "error": "API returned empty dataset"}
-        
         if c_hyg.index.tz is not None: c_hyg.index = c_hyg.index.tz_localize(None)
         if c_ief.index.tz is not None: c_ief.index = c_ief.index.tz_localize(None)
         if c_spy.index.tz is not None: c_spy.index = c_spy.index.tz_localize(None)
-        
         df = pd.concat([c_hyg, c_ief, c_spy], axis=1, keys=['HYG', 'IEF', 'SPY']).dropna()
         if df.empty: return {"status": "offline", "error": "Index Alignment Failed"}
-
         df['Credit_Ratio'] = df['HYG'] / df['IEF']
         df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
         spy_bullish = float(df['SPY'].iloc[-1]) > float(df['SPY'].rolling(20).mean().iloc[-1])
         credit_bearish = float(df['Credit_Ratio'].iloc[-1]) < float(df['Ratio_20SMA'].iloc[-1])
         divergence = spy_bullish and credit_bearish
-        
         return {
             "status": "online", "divergence": divergence, 
             "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1]),
@@ -271,7 +240,6 @@ def get_options_skew(ticker="SPY"):
         df = df.dropna()
         if df.empty: return {"status": "offline", "error": "No price data (API Block)"}
         px = float(df['Close'].iloc[-1])
-        
         tk = yf.Ticker(ticker)
         exps = tk.options
         if not exps: return {"status": "offline", "error": "Options chain unavailable"}
@@ -298,8 +266,7 @@ def get_options_flow_chart_data(live_pcr, ticker="SPY"):
         offset = live_pcr - float(sim_pcr.iloc[-1])
         df['PCR_Proxy'] = sim_pcr + offset
         return df.tail(120)
-    except Exception:
-        return None
+    except Exception: return None
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
@@ -320,20 +287,16 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
         
         df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
         if df.empty: return {"status": "offline", "error": "Insufficient data overlap / Timezone Conflict"}
-        
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
-        
         current_ratio = float(df['Ratio'].iloc[-1])
         current_sma = float(df['Ratio_50SMA'].iloc[-1])
         is_favored = current_ratio > current_sma
-        
         return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
     except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
 def run_master_screener():
-    """V5.39 UNIFIED GLOBAL SCAN: Consolidates Whale, Dark Pool, and Kinetic into one master table."""
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
@@ -347,12 +310,10 @@ def run_master_screener():
             sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
             ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
             ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
-            
             df['Vol_SMA_20'] = df['Volume'].rolling(20).mean()
             vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
             vol_sma_20 = float(df['Vol_SMA_20'].iloc[-1])
             vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
-            
             df['Range'] = df['High'] - df['Low']
             df['ATR_20'] = df['Range'].rolling(20).mean()
             atr_20 = float(df['ATR_20'].iloc[-1])
@@ -362,22 +323,18 @@ def run_master_screener():
             df['Up_Day'] = df['Close'] > df['Open']
             df['Close_Pos'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 0.0001) 
             
-            # --- Dark Pool / System Scores ---
             trend, mom, liq = c > sma_50, ema_9 > ema_21, vol_sma_9 > vol_sma_50
             dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
             dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
             score = sum([trend, mom, liq, dp_vol, dp_comp])
             
-            # --- Whale Hunter Physics ---
             last_2 = df.tail(2)
             whale_block = any((row['Rel_Vol'] >= 2.5 and row['Up_Day'] and row['Close_Pos'] >= 0.7) for _, row in last_2.iterrows())
-            
             last_10 = df.tail(10)
             acc_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (last_10['Up_Day'])])
             dist_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (~last_10['Up_Day'])])
             cluster_acc = acc_days >= 3 and dist_days <= 1
             
-            # --- Hierarchy of Signals ---
             if whale_block and cluster_acc: cat = "☢️ WHALE + CLUSTER"
             elif whale_block: cat = "🐋 WHALE BLOCK"
             elif cluster_acc: cat = "🔥 CLUSTER ACCUMULATION"
@@ -388,12 +345,9 @@ def run_master_screener():
             
             if cat != "STANDBY":
                 results.append({
-                    "Ticker": ticker, 
-                    "Price": f"${c:.2f}", 
-                    "Category": cat,
+                    "Ticker": ticker, "Price": f"${c:.2f}", "Category": cat,
                     "Vol Spike (x)": f"{v/vol_sma_20:.1f}x" if vol_sma_20 > 0 else "0.0x",
-                    "Acc Days (10d)": f"{acc_days}",
-                    "Compression (x)": f"{rng/atr_20:.2f}x" if atr_20 > 0 else "0.00x",
+                    "Acc Days (10d)": f"{acc_days}", "Compression (x)": f"{rng/atr_20:.2f}x" if atr_20 > 0 else "0.00x",
                     "Titan Score": f"{score}/5"
                 })
         except Exception: pass
@@ -412,31 +366,28 @@ def run_rrg_engine(universe_key="Macro (Assets)"):
         benchmark = universes[universe_key]["benchmark"]
         tickers = universes[universe_key]["tickers"]
         
-        closes = pd.DataFrame()
-        volumes = pd.DataFrame()
+        closes, volumes = pd.DataFrame(), pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
                 d = yf.download(t, period="6mo", progress=False)
                 if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
                 d = d.dropna()
                 if not d.empty:
-                    c_col = d['Close']
-                    v_col = d['Volume']
+                    c_col, v_col = d['Close'], d['Volume']
                     if c_col.index.tz is not None: c_col.index = c_col.index.tz_localize(None)
                     if v_col.index.tz is not None: v_col.index = v_col.index.tz_localize(None)
                     closes[t] = c_col
                     volumes[t] = v_col
             except: pass
-            
-        closes = closes.dropna()
-        volumes = volumes.dropna()
+        closes, volumes = closes.dropna(), volumes.dropna()
         if closes.empty or benchmark not in closes.columns: return {"status": "offline", "error": "Insufficient RRG Universe Data"}
         
         results = []
         for ticker in tickers:
             if ticker not in closes.columns: continue
             rs = closes[ticker] / closes[benchmark]
-            rs_ratio, rs_mom = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100, ((rs.rolling(10).mean() / rs.rolling(40).mean()) * 100 / (rs.rolling(10).mean() / rs.rolling(40).mean() * 100).rolling(10).mean()) * 100
+            rs_ratio = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100
+            rs_mom = (rs_ratio / rs_ratio.rolling(10).mean()) * 100
             vol_ratio = volumes[ticker] / volumes[ticker].rolling(20).mean()
             rs_ratio, rs_mom, vol_ratio = rs_ratio.dropna(), rs_mom.dropna(), vol_ratio.dropna()
             if not rs_ratio.empty and not rs_mom.empty:
@@ -457,7 +408,6 @@ def run_tactical_chart(ticker):
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna()
         if df.empty or len(df) < 50: return None, None
-
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
@@ -465,12 +415,10 @@ def run_tactical_chart(ticker):
         df['ATR_20'] = (df['High'] - df['Low']).rolling(window=20).mean()
         df['Vol_Ratio'] = np.where(df['Vol_SMA_20'] > 0, df['Volume'] / df['Vol_SMA_20'], 0)
         df['Range_Comp'] = np.where(df['ATR_20'] > 0, (df['High'] - df['Low']) / df['ATR_20'], 1)
-        
         dp_mask = (df['Vol_Ratio'] >= 1.5) & (df['Range_Comp'] <= 0.75)
         dp_signals = df[dp_mask]
 
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
-
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="PriceAction"), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], line=dict(color='#8b949e', width=2, dash='dot'), name='50 SMA'), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['EMA_9'], line=dict(color='#39FF14', width=1.5), name='9 EMA'), row=1, col=1)
@@ -503,10 +451,10 @@ def run_tactical_chart(ticker):
 
 
 # ==============================================================================
-# BACKTESTER LAB ENGINES
+# V5.41 QUANTITATIVE OPTIMIZER ENGINES
 # ==============================================================================
 @st.cache_data(ttl=3600)
-def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
+def fetch_optimizer_data(ticker: str, period: str = "5y") -> pd.DataFrame:
     df = yf.download(ticker, period=period, progress=False)
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
     df = df.dropna()
@@ -517,79 +465,70 @@ def build_signal_engine(ticker: str, period: str = "5y") -> pd.DataFrame:
     df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
     df['Range'] = df['High'] - df['Low']
     df['ATR_20'] = df['Range'].rolling(window=20).mean()
-    df['Vol_SMA_9'] = df['Volume'].rolling(window=9).mean()
     df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
-    df['Vol_SMA_50'] = df['Volume'].rolling(window=50).mean()
-
-    trend_bullish = df['Close'] > df['SMA_50']
-    ema_above_today = df['EMA_9'] > df['EMA_21']
-    ema_below_yesterday = df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)
-    kinetic_cross = ema_above_today & ema_below_yesterday
-    
-    liquidity_expanding = df['Volume'] > (df['Vol_SMA_20'] * 1.2)
-
-    df['Signal_Long'] = trend_bullish & kinetic_cross & liquidity_expanding
     return df.dropna()
 
-@st.cache_data(ttl=3600)
-def run_execution_engine(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    trade_ledger = []
-    in_position = False
-    entry_date = None
-    entry_price = 0.0
-    current_stop = 0.0
-
-    for i in range(len(df) - 1):
-        today_date = df.index[i]
-        today = df.iloc[i]
-        tomorrow_date = df.index[i + 1]
-        tomorrow = df.iloc[i + 1]
-
-        if not in_position:
-            if today['Signal_Long']:
-                in_position = True
-                entry_date = tomorrow_date
-                entry_price = float(tomorrow['Open'])
-                current_stop = float(today['Close']) - (2 * float(today['ATR_20']))
-                if entry_price < current_stop: current_stop = entry_price 
+def run_fast_backtest(df: pd.DataFrame, vol_thresh: float, atr_mult: float):
+    """Vectorized and highly optimized path-dependent execution engine."""
+    # Pre-calculate signal logic (Trend + Momentum Cross + Volume Spike)
+    signal = (df['Close'] > df['SMA_50']) & (df['EMA_9'] > df['EMA_21']) & (df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)) & (df['Volume'] > (df['Vol_SMA_20'] * vol_thresh))
+    
+    closes = df['Close'].values
+    opens = df['Open'].values
+    lows = df['Low'].values
+    sma50s = df['SMA_50'].values
+    atrs = df['ATR_20'].values
+    signals = signal.values
+    
+    trades = []
+    in_pos = False
+    entry_px = 0.0
+    stop_px = 0.0
+    
+    for i in range(1, len(df) - 1):
+        if not in_pos:
+            if signals[i-1]:
+                in_pos = True
+                entry_px = opens[i]
+                stop_px = closes[i-1] - (atr_mult * atrs[i-1])
+                if entry_px < stop_px: stop_px = entry_px
         else:
-            if float(today['Low']) <= current_stop:
-                exit_price = current_stop
-                if float(today['Open']) < current_stop: exit_price = float(today['Open'])
-                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-                trade_ledger.append({
-                    "Ticker": ticker, "Entry Date": entry_date.strftime('%Y-%m-%d'), "Entry Price": entry_price,
-                    "Exit Date": today_date.strftime('%Y-%m-%d'), "Exit Price": exit_price,
-                    "Exit Reason": "Tactical Stop (2x ATR)", "PnL (%)": pnl_pct
-                })
-                in_position = False
-                continue
-
-            if float(today['Close']) < float(today['SMA_50']):
-                exit_price = float(tomorrow['Open'])
-                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-                trade_ledger.append({
-                    "Ticker": ticker, "Entry Date": entry_date.strftime('%Y-%m-%d'), "Entry Price": entry_price,
-                    "Exit Date": tomorrow_date.strftime('%Y-%m-%d'), "Exit Price": exit_price,
-                    "Exit Reason": "Structural Stop (50 SMA)", "PnL (%)": pnl_pct
-                })
-                in_position = False
-                continue
-
-            theoretical_stop = float(today['Close']) - (2 * float(today['ATR_20']))
-            if theoretical_stop > current_stop: current_stop = theoretical_stop
-
-    if in_position:
-        last_day = df.iloc[-1]
-        exit_price = float(last_day['Close'])
-        pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-        trade_ledger.append({
-            "Ticker": ticker, "Entry Date": entry_date.strftime('%Y-%m-%d'), "Entry Price": entry_price,
-            "Exit Date": df.index[-1].strftime('%Y-%m-%d'), "Exit Price": exit_price,
-            "Exit Reason": "End of Backtest Dataset", "PnL (%)": pnl_pct
-        })
-    return pd.DataFrame(trade_ledger)
-
+            # Hit Trailing Stop
+            if lows[i] <= stop_px:
+                exit_px = stop_px if opens[i] >= stop_px else opens[i]
+                trades.append((exit_px - entry_px) / entry_px)
+                in_pos = False
+            # Hit Structural Stop
+            elif closes[i] < sma50s[i]:
+                exit_px = opens[i+1]
+                trades.append((exit_px - entry_px) / entry_px)
+                in_pos = False
+            else:
+                # Trail Stop Up
+                new_stop = closes[i] - (atr_mult * atrs[i])
+                if new_stop > stop_px: stop_px = new_stop
+                
+    if in_pos: trades.append((closes[-1] - entry_px) / entry_px)
+    
+    if not trades: return None
+    
+    trades_arr = np.array(trades)
+    wins = trades_arr[trades_arr > 0]
+    losses = trades_arr[trades_arr <= 0]
+    
+    wr = len(wins) / len(trades_arr)
+    lr = 1 - wr
+    avg_w = wins.mean() if len(wins) > 0 else 0.0
+    avg_l = losses.mean() if len(losses) > 0 else 0.0
+    exp = (wr * avg_w) / abs(lr * avg_l) if lr > 0 and avg_l != 0 else 0.0
+    roi = (np.prod(1 + trades_arr) - 1)
+    
+    return {
+        "Vol Thresh": vol_thresh, "ATR Multiplier": atr_mult,
+        "Trades": len(trades_arr), "Win Rate (%)": wr * 100, 
+        "Avg Win (%)": avg_w * 100, "Avg Loss (%)": avg_l * 100,
+        "Expectancy": exp, "Total ROI (%)": roi * 100
+    }
 
 # ==============================================================================
 # ROUTING LOGIC: LIVE COMMAND CENTER
@@ -649,37 +588,19 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         matrix_res = get_cross_asset_matrix()
         if matrix_res['status'] == 'online':
             corr_df = matrix_res['data']
-            
-            custom_colorscale = [
-                [0.0, '#FF4444'],
-                [0.5, '#161b22'],
-                [1.0, '#39FF14'] 
-            ]
-            
+            custom_colorscale = [[0.0, '#FF4444'], [0.5, '#161b22'], [1.0, '#39FF14']]
             fig_hm = go.Figure(data=go.Heatmap(
-                z=corr_df.values,
-                x=corr_df.columns,
-                y=corr_df.index,
-                colorscale=custom_colorscale,
-                zmin=-1, zmax=1,
-                text=corr_df.values,
-                texttemplate="%{text}",
-                showscale=False,
-                hoverinfo="x+y+z"
+                z=corr_df.values, x=corr_df.columns, y=corr_df.index,
+                colorscale=custom_colorscale, zmin=-1, zmax=1,
+                text=corr_df.values, texttemplate="%{text}", showscale=False, hoverinfo="x+y+z"
             ))
-            
             fig_hm.update_layout(
-                plot_bgcolor='#0d1117', 
-                paper_bgcolor='#0d1117', 
-                font=dict(color='#c9d1d9', size=14),
-                margin=dict(l=20, r=20, t=20, b=20),
-                height=450,
-                xaxis=dict(side="bottom", showgrid=False),
-                yaxis=dict(autorange="reversed", showgrid=False)
+                plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9', size=14),
+                margin=dict(l=20, r=20, t=20, b=20), height=450,
+                xaxis=dict(side="bottom", showgrid=False), yaxis=dict(autorange="reversed", showgrid=False)
             )
             st.plotly_chart(fig_hm, width="stretch", key="heatmap_chart")
-        else:
-            st.error(f"Pearson Matrix Offline: {matrix_res.get('error', 'Unknown Error')}")
+        else: st.error(f"Pearson Matrix Offline: {matrix_res.get('error', 'Unknown Error')}")
 
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
@@ -697,8 +618,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         st.markdown("<div class='apex-header' style='margin-top: 20px;'>☢️ DEALER MATRIX (LIVE GAMMA FLOW)</div>", unsafe_allow_html=True)
         with st.spinner("Scanning Institutional Options Chains & Kinetic Flow..."):
             gamma_data = get_gamma_walls()
-            if not gamma_data:
-                st.info("No options data available at this time.")
+            if not gamma_data: st.info("No options data available at this time.")
             else:
                 for g in gamma_data:
                     zg = g['Zero Gamma']
@@ -707,14 +627,9 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     px = g['Price']
                     pcr = g['PCR']
 
-                    if px >= zg:
-                        vol_state = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>"
-                        cc_main = "card-neutral"
-                    else:
-                        vol_state = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>"
-                        cc_main = "card-bearish"
+                    if px >= zg: vol_state, cc_main = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>", "card-neutral"
+                    else: vol_state, cc_main = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>", "card-bearish"
                         
-                    # Active Flow Tags
                     c1_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('CW1_Active') else ""
                     c2_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('CW2_Active') else ""
                     p1_tag = "<span style='color:#FFAA00; font-size:0.7rem; font-weight:bold; margin-left:5px;'>[⚡ ACTIVE POUR]</span>" if g.get('PW1_Active') else ""
@@ -747,7 +662,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             if credit_data['status'] == 'online':
                 cc, tc, cm = ("card-bearish", "#FF4444", "RISK-OFF DIVERGENCE") if credit_data['divergence'] else ("card-bullish", "#39FF14", "CREDIT ALIGNED (RISK-ON)")
                 st.markdown(f"<div class='tactical-card {cc}'><div><div class='asset-title'>CREDIT STRESS RADAR</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>HYG/IEF RATIO:</span><span style='color:#FFF; font-weight:bold;'>{credit_data['ratio']:.3f}</span></div><div class='data-row'><span>TREND:</span><span style='color:{tc}; font-weight:bold;'>{'DIVERGING' if credit_data['divergence'] else 'SUPPORTIVE'}</span></div></div></div><div class='mandate-box {'mandate-sell' if credit_data['divergence'] else 'mandate-buy'}'>[ {cm} ]</div></div>", unsafe_allow_html=True)
-                
                 df_c = credit_data['history']
                 fig_c = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_c.add_trace(go.Scatter(x=df_c.index, y=df_c['SPY'], name="SPY Price", line=dict(color='#58a6ff', width=2)), secondary_y=False)
@@ -765,7 +679,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 is_fear = skew_data['skew'] > 5.0 or skew_data['pcr'] > 1.5
                 sc, tc, sm = ("card-bearish", "#FF4444", "INSTITUTIONS HEDGING (FEAR)") if is_fear else ("card-bullish", "#39FF14", "VOL SKEW NORMAL")
                 st.markdown(f"<div class='tactical-card {sc}'><div><div class='asset-title'>OPTIONS FLOW (SPY)</div><div class='metric-sub' style='margin-top:10px;'><div class='data-row'><span>PUT/CALL RATIO:</span><span style='color:#FFF; font-weight:bold;'>{skew_data['pcr']:.2f}</span></div><div class='data-row'><span>SKEW (PUT IV - CALL IV):</span><span style='color:{tc}; font-weight:bold;'>{skew_data['skew']:+.2f}%</span></div></div></div><div class='mandate-box {'mandate-sell' if is_fear else 'mandate-buy'}'>[ {sm} ]</div></div>", unsafe_allow_html=True)
-                
                 df_o = get_options_flow_chart_data(skew_data['pcr'])
                 if df_o is not None:
                     fig_o = make_subplots(specs=[[{"secondary_y": True}]])
@@ -782,7 +695,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
 
     with rot_col1:
         rot_tabs = st.tabs(["Macro Flow (SPY / DBC)", "Risk Breadth (IJR / SPY)"])
-        
         with rot_tabs[0]:
             with st.spinner("Calculating Intermarket See-Saw..."):
                 spy_dbc = run_rotation_engine("SPY", "DBC")
@@ -792,8 +704,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     status_text = "EQUITIES DOMINATING" if eq_favored else "COMMODITIES DOMINATING"
                     st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
                     st.line_chart(spy_dbc['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
-                else:
-                    st.error(f"SPY/DBC Engine Offline: {spy_dbc.get('error', 'Unknown Error')}")
+                else: st.error(f"SPY/DBC Engine Offline: {spy_dbc.get('error', 'Unknown Error')}")
 
         with rot_tabs[1]:
             with st.spinner("Calculating Small-Cap Breadth..."):
@@ -804,8 +715,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                     status_text = "SMALL CAPS LEADING (RISK-ON BREADTH)" if breadth_favored else "LARGE CAPS DEFENSIVE (NARROW MARKET)"
                     st.markdown(f"<div style='border: 2px solid {box_color}; background-color: {box_bg}; border-radius: 8px; padding: 20px; margin-bottom: 20px;'><h3 style='color: {box_color}; margin-top: 0;'>SYSTEM READOUT: {status_text}</h3></div>", unsafe_allow_html=True)
                     st.line_chart(breadth_engine['chart'], color=["#58a6ff", "#8b949e"], width="stretch")
-                else:
-                    st.error(f"Breadth Engine Offline: {breadth_engine.get('error', 'Unknown Error')}")
+                else: st.error(f"Breadth Engine Offline: {breadth_engine.get('error', 'Unknown Error')}")
 
     with rot_col2:
         selected_universe = st.radio("Select RRG Universe:", ["Sectors (S&P 500)", "Subsectors (Industry)", "AI & Tech Infra", "Macro (Assets)", "Crypto Proxy"], horizontal=True, label_visibility="collapsed")
@@ -832,13 +742,10 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                         marker=dict(size=[4, 4, 4, 4, item["Bubble_Size"]], color=color, line=dict(width=1, color="#FFF") if item["Bubble_Size"] > 10 else dict(width=0)),
                         line=dict(width=2, color=color)
                     ))
-                
                 fig.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9'), xaxis=dict(title='Relative Strength vs Benchmark', gridcolor='#30363d', zeroline=False), yaxis=dict(title='Momentum', gridcolor='#30363d', zeroline=False), margin=dict(l=20, r=20, t=20, b=20), showlegend=False, height=400)
                 st.plotly_chart(fig, width="stretch")
-            else:
-                st.error(f"RRG Engine Offline: {rrg_engine.get('error', 'Unknown Error')}")
+            else: st.error(f"RRG Engine Offline: {rrg_engine.get('error', 'Unknown Error')}")
 
-    # --- V5.39 UNIFIED MASTER SCREENER ---
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🔍 TITAN MASTER SCREENER (UNIFIED GLOBAL SCAN)</div>", unsafe_allow_html=True)
     st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Vectorized 5-Factor scan across the Lieutenants universe, incorporating Whale Blocks and Accumulation Clusters.</p>", unsafe_allow_html=True)
 
@@ -847,8 +754,7 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             screen_df = run_master_screener()
             if not screen_df.empty:
                 st.dataframe(screen_df.sort_values(by="Vol Spike (x)", ascending=False), width="stretch", hide_index=True)
-            else:
-                st.info("No actionable Tier 1, Stealth setups, or Whale Blocks detected across the universe today.")
+            else: st.info("No actionable Tier 1, Stealth setups, or Whale Blocks detected across the universe today.")
 
     st.markdown("<div class='apex-header' style='margin-top: 40px;'>🎯 TACTICAL RECON & DECODER</div>", unsafe_allow_html=True)
     recon_col1, recon_col2 = st.columns([1, 4], gap="medium")
@@ -874,7 +780,6 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
         mom_bull = last_data['EMA_9'] > last_data['EMA_21']
         liq_bull = last_data['Vol_SMA_9'] > last_data['Vol_SMA_50']
         dp_active = (last_data['Vol_Ratio'] >= 1.5) and (last_data['Range_Comp'] <= 0.75)
-        
         struct_dist = c - last_data['SMA_50']
         struct_pct = (struct_dist / c) * 100
         tact_dist = 2 * last_data['ATR_20']
@@ -900,78 +805,70 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
         journal_str = f"[{datetime.now().strftime('%Y-%m-%d')}] TARGET: {target_chart} @ ${c:.2f} | T: {'BULL' if trend_bull else 'BEAR'} | M: {'IGNITED' if mom_bull else 'LAGGING'} | L: {'EXPANDING' if liq_bull else 'CONTRACTING'} | DP: {'YES' if dp_active else 'NO'} | STRUC RSK: {abs(struct_pct):.2f}% | TACT RSK: {tact_pct:.2f}%"
         st.markdown("<p style='color: #8b949e; font-size: 0.9rem; margin-top: 20px;'>Auto-Journal Entry (Click to Copy):</p>", unsafe_allow_html=True)
         st.code(journal_str, language="text")
 
 # ==============================================================================
-# ROUTING LOGIC: BACKTESTER LAB
+# ROUTING LOGIC: QUANT OPTIMIZER LAB
 # ==============================================================================
-elif app_mode == "🧪 BACKTESTER LAB":
-    st.markdown("<div class='apex-header'>🔬 QUANTITATIVE BACKTESTER LAB</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Run historical, path-dependent simulations using the Titan Omega logic to mathematically validate edge.</p>", unsafe_allow_html=True)
+elif app_mode == "🧪 QUANT OPTIMIZER LAB":
+    st.markdown("<div class='apex-header'>🔬 QUANTITATIVE OPTIMIZER (BRUTE-FORCE GRID SEARCH)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Mathematically prove threshold robustness. Hunt for the 'Plateau of Edge' to prevent curve-fitting.</p>", unsafe_allow_html=True)
 
-    bk_col1, bk_col2, bk_col3 = st.columns([2, 2, 1])
-    with bk_col1:
-        test_ticker = st.text_input("Enter Ticker Symbol:", value="NVDA", max_chars=10).upper()
-    with bk_col2:
-        test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y", "max"], index=2)
-    with bk_col3:
-        st.write("") # Spacing
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1: test_ticker = st.text_input("Target Ticker:", value="NVDA", max_chars=10).upper()
+    with c2: test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y"], index=2)
+    with c3:
         st.write("")
-        run_sim = st.button("RUN SIMULATION", use_container_width=True)
+        st.write("")
+        run_opt = st.button("RUN GRID SEARCH", use_container_width=True)
 
-    if run_sim:
-        with st.spinner(f"Ingesting {test_period} of historical data for {test_ticker}..."):
-            df_signals = build_signal_engine(test_ticker, test_period)
-            
-            if df_signals.empty:
-                st.error(f"Failed to fetch data for {test_ticker}. Verify ticker or API limits.")
+    st.markdown("<div style='background: rgba(88, 166, 255, 0.1); padding: 15px; border-radius: 6px; border-left: 4px solid #58a6ff; margin-bottom: 20px;'><h4 style='margin:0; color:#58a6ff;'>Optimizer Parameters</h4><p style='margin:5px 0 0 0; font-size: 0.85rem; color:#c9d1d9;'>Scanning 16 permutations: Vol Spike thresholds vs ATR Stop Multipliers.</p></div>", unsafe_allow_html=True)
+
+    if run_opt:
+        with st.spinner(f"Ingesting {test_period} data for {test_ticker}..."):
+            df = fetch_optimizer_data(test_ticker, test_period)
+            if df.empty:
+                st.error(f"Failed to fetch data for {test_ticker}.")
             else:
-                with st.spinner("Executing path-dependent state machine (calculating trailing stops)..."):
-                    ledger_df = run_execution_engine(df_signals, test_ticker)
+                with st.spinner("Executing multi-dimensional vector simulations..."):
+                    results = []
+                    # The Grid: Test 16 total variations
+                    vol_ranges = [1.2, 1.5, 1.8, 2.0]
+                    atr_ranges = [1.5, 2.0, 2.5, 3.0]
                     
-                    if ledger_df.empty:
-                        st.warning("Zero trades executed. The Titan Omega criteria did not trigger during this period.")
+                    for vt in vol_ranges:
+                        for am in atr_ranges:
+                            res = run_fast_backtest(df, vt, am)
+                            if res: results.append(res)
+                    
+                    res_df = pd.DataFrame(results)
+                    
+                    if res_df.empty:
+                        st.warning("Zero trades executed across all tested parameters. The baseline logic did not trigger.")
                     else:
-                        st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>📊 PERFORMANCE LEDGER</h3>", unsafe_allow_html=True)
+                        # Build Heatmap Data
+                        pivot_df = res_df.pivot(index='ATR Multiplier', columns='Vol Thresh', values='Expectancy').fillna(0)
                         
-                        # Calculate Analytics
-                        total_trades = len(ledger_df)
-                        winning_trades = ledger_df[ledger_df['PnL (%)'] > 0]
-                        losing_trades = ledger_df[ledger_df['PnL (%)'] <= 0]
-                        
-                        win_rate = (len(winning_trades) / total_trades) * 100
-                        avg_win = winning_trades['PnL (%)'].mean() if not winning_trades.empty else 0.0
-                        avg_loss = losing_trades['PnL (%)'].mean() if not losing_trades.empty else 0.0
-                        
-                        loss_rate_decimal = len(losing_trades) / total_trades
-                        win_rate_decimal = win_rate / 100
-                        expectancy = (win_rate_decimal * avg_win) / (loss_rate_decimal * abs(avg_loss)) if loss_rate_decimal > 0 and avg_loss != 0 else float('inf')
-                        
-                        multipliers = 1 + (ledger_df['PnL (%)'] / 100)
-                        total_roi_pct = (multipliers.prod() - 1) * 100
+                        st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>🗺️ EXPECTANCY PLATEAU HEATMAP</h3>", unsafe_allow_html=True)
+                        st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Look for clusters of high expectancy. A single bright square is a curve-fit anomaly. A solid block of color represents structural edge.</p>", unsafe_allow_html=True)
 
-                        # Render Metrics
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("System Win Rate", f"{win_rate:.1f}%")
-                        m2.metric("Expectancy Ratio", f"{expectancy:.2f}")
-                        m3.metric("Total ROI (Compounded)", f"{total_roi_pct:.1f}%")
-                        m4.metric("Total Executions", total_trades)
+                        fig_opt = go.Figure(data=go.Heatmap(
+                            z=pivot_df.values, x=[f"{v}x Vol" for v in pivot_df.columns], y=[f"{a}x ATR" for a in pivot_df.index],
+                            colorscale=[[0.0, '#FF4444'], [0.5, '#161b22'], [1.0, '#39FF14']],
+                            text=np.round(pivot_df.values, 2), texttemplate="%{text}", showscale=True
+                        ))
+                        fig_opt.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9', size=14), margin=dict(l=20, r=20, t=20, b=20), height=500)
+                        st.plotly_chart(fig_opt, width="stretch")
 
-                        st.markdown("---")
+                        st.markdown("<h3 style='color: #FFF; margin-top: 40px;'>🧾 SIMULATION LEDGER (SORTED BY EDGE)</h3>", unsafe_allow_html=True)
                         
-                        m5, m6 = st.columns(2)
-                        m5.metric("Average Winning Trade", f"+{avg_win:.2f}%")
-                        m6.metric("Average Losing Trade", f"{avg_loss:.2f}%")
-
-                        st.markdown("<h3 style='color: #FFF; margin-top: 40px;'>🧾 TRADE LOG</h3>", unsafe_allow_html=True)
-                        
-                        # Formatting for UI Display
-                        display_df = ledger_df.copy()
-                        display_df['Entry Price'] = display_df['Entry Price'].map('${:,.2f}'.format)
-                        display_df['Exit Price'] = display_df['Exit Price'].map('${:,.2f}'.format)
-                        display_df['PnL (%)'] = display_df['PnL (%)'].map('{:+.2f}%'.format)
+                        display_df = res_df.sort_values(by="Expectancy", ascending=False).copy()
+                        display_df['Win Rate (%)'] = display_df['Win Rate (%)'].map('{:.1f}%'.format)
+                        display_df['Total ROI (%)'] = display_df['Total ROI (%)'].map('{:+.1f}%'.format)
+                        display_df['Avg Win (%)'] = display_df['Avg Win (%)'].map('{:+.2f}%'.format)
+                        display_df['Avg Loss (%)'] = display_df['Avg Loss (%)'].map('{:.2f}%'.format)
+                        display_df['Expectancy'] = display_df['Expectancy'].map('{:.2f}'.format)
                         
                         st.dataframe(display_df, width="stretch", hide_index=True)

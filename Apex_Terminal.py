@@ -1,6 +1,6 @@
 # FILE: apex_terminal.py
 # ROLE: Master UI Dashboard
-# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.41 + Quant Optimizer Lab)
+# ARCHITECTURE: Streamlit Convergence (Tactical UI V5.42 + Global Optimizer Sweep)
 # STATUS: ACTIVE (Uncompressed Master Build)
 
 import streamlit as st
@@ -53,7 +53,7 @@ st.markdown("""
 st.sidebar.markdown("<h2 style='text-align: center; color: #58a6ff;'>SYSTEM MENU</h2>", unsafe_allow_html=True)
 app_mode = st.sidebar.radio("Select Module:", ["🚀 LIVE COMMAND CENTER", "🧪 QUANT OPTIMIZER LAB"])
 st.sidebar.markdown("---")
-st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.41<br>System Online.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 0.8rem; color: #8b949e; text-align: center;'>TITAN OMEGA V5.42<br>System Online.</p>", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; color: #FFF; font-weight: 900; letter-spacing: 3px; margin-bottom: 20px;'>🦅 TITAN APEX COMMAND</h1>", unsafe_allow_html=True)
 
@@ -76,10 +76,13 @@ def get_fomc_data():
     try:
         if not hasattr(cfg, 'FRED_API_KEY') or cfg.FRED_API_KEY == "PASTE_YOUR_32_CHARACTER_KEY_HERE" or cfg.FRED_API_KEY == "":
             return {"status": "offline", "error": "Missing FRED_API_KEY in apex_config.py"}
+
         api_key = cfg.FRED_API_KEY
+        
         yc_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key={api_key}&file_type=json"
         res_yc = requests.get(yc_url, timeout=10)
         if res_yc.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected T10Y2Y: {res_yc.status_code}"}
+        
         df_yc = pd.DataFrame(res_yc.json()['observations'])
         df_yc['date'] = pd.to_datetime(df_yc['date'])
         df_yc['value'] = pd.to_numeric(df_yc['value'], errors='coerce')
@@ -88,6 +91,7 @@ def get_fomc_data():
         ff_url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={api_key}&file_type=json"
         res_ff = requests.get(ff_url, timeout=10)
         if res_ff.status_code != 200: return {"status": "offline", "error": f"FRED API Rejected DFF: {res_ff.status_code}"}
+        
         df_ff = pd.DataFrame(res_ff.json()['observations'])
         df_ff['date'] = pd.to_datetime(df_ff['date'])
         df_ff['value'] = pd.to_numeric(df_ff['value'], errors='coerce')
@@ -95,11 +99,14 @@ def get_fomc_data():
 
         df = df_yc.join(df_ff, how='inner').dropna()
         df = df[df.index > (datetime.now() - pd.DateOffset(years=5))]
+        
         if df.empty: return {"status": "offline", "error": "FRED API Returned Empty Dataset"}
         
         status = "INVERTED (RECESSION WARNING)" if df['Yield_Curve'].iloc[-1] < 0 else "NORMAL (CONTANGO)"
         return {"status": "online", "data": df, "curve_status": status, "current_yc": float(df['Yield_Curve'].iloc[-1]), "current_ff": float(df['Fed_Funds'].iloc[-1])}
-    except Exception as e: return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
+        
+    except Exception as e:
+        return {"status": "offline", "error": f"API Architecture Failure: {str(e)}"}
 
 @st.cache_data(ttl=3600)
 def get_cross_asset_matrix():
@@ -108,13 +115,17 @@ def get_cross_asset_matrix():
         df = yf.download(tickers, period="3mo", progress=False)['Close']
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
         df = df.dropna(how='all')
+        
         returns = df.pct_change().dropna()
         if returns.empty: return {"status": "offline", "error": "Insufficient data for correlation matrix"}
+        
         corr_matrix = returns.corr().round(2)
         valid_tickers = [t for t in tickers if t in corr_matrix.columns]
         corr_matrix = corr_matrix.reindex(index=valid_tickers, columns=valid_tickers)
+        
         return {"status": "online", "data": corr_matrix}
-    except Exception as e: return {"status": "offline", "error": str(e)}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=3600)
 def get_macro_tide():
@@ -123,7 +134,8 @@ def get_macro_tide():
     try:
         response = requests.get(url, headers=headers, timeout=10)
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-            with z.open(z.namelist()[0]) as f: df = pd.read_csv(f, low_memory=False)
+            with z.open(z.namelist()[0]) as f:
+                df = pd.read_csv(f, low_memory=False)
         df.columns = df.columns.str.strip().str.upper()
         date_col = next(c for c in df.columns if 'REPORT_DATE' in c)
         market_col = next(c for c in df.columns if 'MARKET_AND_EXCHANGE' in c)
@@ -146,6 +158,7 @@ def get_macro_tide():
 
 @st.cache_data(ttl=300)
 def get_gamma_walls():
+    """V5.42 KINETIC GAMMA ENGINE"""
     results = []
     target_tickers = ["SPY", "QQQ", "IWM", "NVDA", "AAPL", "TSLA", "SMH", "XLE"]
     for ticker in target_tickers:
@@ -155,37 +168,47 @@ def get_gamma_walls():
             df = df.dropna()
             if df.empty: continue
             px = float(df['Close'].iloc[-1])
+            
             tk = yf.Ticker(ticker)
             expirations = tk.options
             if not expirations: continue
             chain = tk.option_chain(expirations[0])
+            
             calls = chain.calls
             puts = chain.puts
             if calls.empty or puts.empty: continue
+            
             total_call_oi = calls['openInterest'].sum()
             total_put_oi = puts['openInterest'].sum()
             pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
+
             calls_sorted = calls.sort_values(by='openInterest', ascending=False)
             puts_sorted = puts.sort_values(by='openInterest', ascending=False)
+                
             c_wall_1 = calls_sorted.iloc[0]['strike']
             c_wall_1_oi = calls_sorted.iloc[0]['openInterest']
             c_wall_1_vol = calls_sorted.iloc[0]['volume']
             c1_active = c_wall_1_vol > c_wall_1_oi
+            
             c_wall_2 = calls_sorted.iloc[1]['strike'] if len(calls_sorted) > 1 else c_wall_1
             c_wall_2_oi = calls_sorted.iloc[1]['openInterest'] if len(calls_sorted) > 1 else c_wall_1_oi
             c_wall_2_vol = calls_sorted.iloc[1]['volume'] if len(calls_sorted) > 1 else c_wall_1_vol
             c2_active = c_wall_2_vol > c_wall_2_oi
+            
             p_wall_1 = puts_sorted.iloc[0]['strike']
             p_wall_1_oi = puts_sorted.iloc[0]['openInterest']
             p_wall_1_vol = puts_sorted.iloc[0]['volume']
             p1_active = p_wall_1_vol > p_wall_1_oi
+            
             p_wall_2 = puts_sorted.iloc[1]['strike'] if len(puts_sorted) > 1 else p_wall_1
             p_wall_2_oi = puts_sorted.iloc[1]['openInterest'] if len(puts_sorted) > 1 else p_wall_1_oi
             p_wall_2_vol = puts_sorted.iloc[1]['volume'] if len(puts_sorted) > 1 else p_wall_1_vol
             p2_active = p_wall_2_vol > p_wall_2_oi
+            
             merged = pd.merge(calls[['strike', 'openInterest']], puts[['strike', 'openInterest']], on='strike', how='outer').fillna(0)
             merged['total_oi'] = merged['openInterest_x'] + merged['openInterest_y']
             zero_gamma = float(merged.sort_values(by='total_oi', ascending=False).iloc[0]['strike'])
+
             if c_wall_1 > c_wall_2: 
                 c_wall_1, c_wall_2 = c_wall_2, c_wall_1
                 c_wall_1_oi, c_wall_2_oi = c_wall_2_oi, c_wall_1_oi
@@ -194,6 +217,7 @@ def get_gamma_walls():
                 p_wall_1, p_wall_2 = p_wall_2, p_wall_1
                 p_wall_1_oi, p_wall_2_oi = p_wall_2_oi, p_wall_1_oi
                 p1_active, p2_active = p2_active, p1_active
+
             results.append({
                 "Ticker": ticker, "Price": px, "Zero Gamma": zero_gamma, "PCR": pcr,
                 "Call Wall 1": c_wall_1, "Dist CW1": ((c_wall_1 - px) / px) * 100, "CW1_OI": c_wall_1_oi, "CW1_Active": c1_active,
@@ -210,21 +234,27 @@ def run_credit_stress_engine():
         df_hyg = yf.download("HYG", period="6mo", progress=False)
         df_ief = yf.download("IEF", period="6mo", progress=False)
         df_spy = yf.download("SPY", period="6mo", progress=False)
+        
         if isinstance(df_hyg.columns, pd.MultiIndex): df_hyg.columns = df_hyg.columns.droplevel(1)
         if isinstance(df_ief.columns, pd.MultiIndex): df_ief.columns = df_ief.columns.droplevel(1)
         if isinstance(df_spy.columns, pd.MultiIndex): df_spy.columns = df_spy.columns.droplevel(1)
+        
         c_hyg, c_ief, c_spy = df_hyg['Close'].dropna(), df_ief['Close'].dropna(), df_spy['Close'].dropna()
         if c_hyg.empty or c_ief.empty or c_spy.empty: return {"status": "offline", "error": "API returned empty dataset"}
+        
         if c_hyg.index.tz is not None: c_hyg.index = c_hyg.index.tz_localize(None)
         if c_ief.index.tz is not None: c_ief.index = c_ief.index.tz_localize(None)
         if c_spy.index.tz is not None: c_spy.index = c_spy.index.tz_localize(None)
+        
         df = pd.concat([c_hyg, c_ief, c_spy], axis=1, keys=['HYG', 'IEF', 'SPY']).dropna()
         if df.empty: return {"status": "offline", "error": "Index Alignment Failed"}
+
         df['Credit_Ratio'] = df['HYG'] / df['IEF']
         df['Ratio_20SMA'] = df['Credit_Ratio'].rolling(20).mean()
         spy_bullish = float(df['SPY'].iloc[-1]) > float(df['SPY'].rolling(20).mean().iloc[-1])
         credit_bearish = float(df['Credit_Ratio'].iloc[-1]) < float(df['Ratio_20SMA'].iloc[-1])
         divergence = spy_bullish and credit_bearish
+        
         return {
             "status": "online", "divergence": divergence, 
             "ratio": float(df['Credit_Ratio'].iloc[-1]), "sma": float(df['Ratio_20SMA'].iloc[-1]),
@@ -240,6 +270,7 @@ def get_options_skew(ticker="SPY"):
         df = df.dropna()
         if df.empty: return {"status": "offline", "error": "No price data (API Block)"}
         px = float(df['Close'].iloc[-1])
+        
         tk = yf.Ticker(ticker)
         exps = tk.options
         if not exps: return {"status": "offline", "error": "Options chain unavailable"}
@@ -266,7 +297,8 @@ def get_options_flow_chart_data(live_pcr, ticker="SPY"):
         offset = live_pcr - float(sim_pcr.iloc[-1])
         df['PCR_Proxy'] = sim_pcr + offset
         return df.tail(120)
-    except Exception: return None
+    except Exception:
+        return None
 
 @st.cache_data(ttl=3600)
 def run_rotation_engine(sym1="SPY", sym2="DBC"):
@@ -287,16 +319,20 @@ def run_rotation_engine(sym1="SPY", sym2="DBC"):
         
         df = pd.concat([c1, c2], axis=1, keys=[sym1, sym2]).dropna()
         if df.empty: return {"status": "offline", "error": "Insufficient data overlap / Timezone Conflict"}
+        
         df['Ratio'] = df[sym1] / df[sym2]
         df['Ratio_50SMA'] = df['Ratio'].rolling(50).mean()
+        
         current_ratio = float(df['Ratio'].iloc[-1])
         current_sma = float(df['Ratio_50SMA'].iloc[-1])
         is_favored = current_ratio > current_sma
+        
         return {"status": "online", "favored": is_favored, "ratio": current_ratio, "sma": current_sma, "chart": df[['Ratio', 'Ratio_50SMA']].tail(90)}
     except Exception as e: return {"status": "offline", "error": str(e)}
 
 @st.cache_data(ttl=900)
 def run_master_screener():
+    """V5.42 UNIFIED GLOBAL SCAN: Consolidates Whale, Dark Pool, and Kinetic into one master table."""
     results = []
     tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
     for ticker in tickers:
@@ -310,10 +346,12 @@ def run_master_screener():
             sma_50 = float(df['Close'].rolling(50).mean().iloc[-1])
             ema_9 = float(df['Close'].ewm(span=9, adjust=False).mean().iloc[-1])
             ema_21 = float(df['Close'].ewm(span=21, adjust=False).mean().iloc[-1])
+            
             df['Vol_SMA_20'] = df['Volume'].rolling(20).mean()
             vol_sma_9 = float(df['Volume'].rolling(9).mean().iloc[-1])
             vol_sma_20 = float(df['Vol_SMA_20'].iloc[-1])
             vol_sma_50 = float(df['Volume'].rolling(50).mean().iloc[-1])
+            
             df['Range'] = df['High'] - df['Low']
             df['ATR_20'] = df['Range'].rolling(20).mean()
             atr_20 = float(df['ATR_20'].iloc[-1])
@@ -323,18 +361,22 @@ def run_master_screener():
             df['Up_Day'] = df['Close'] > df['Open']
             df['Close_Pos'] = (df['Close'] - df['Low']) / (df['High'] - df['Low'] + 0.0001) 
             
+            # --- Dark Pool / System Scores ---
             trend, mom, liq = c > sma_50, ema_9 > ema_21, vol_sma_9 > vol_sma_50
             dp_vol = (v / vol_sma_20) >= 1.5 if vol_sma_20 > 0 else False
             dp_comp = (rng / atr_20) <= 0.75 if atr_20 > 0 else False
             score = sum([trend, mom, liq, dp_vol, dp_comp])
             
+            # --- Whale Hunter Physics ---
             last_2 = df.tail(2)
             whale_block = any((row['Rel_Vol'] >= 2.5 and row['Up_Day'] and row['Close_Pos'] >= 0.7) for _, row in last_2.iterrows())
+            
             last_10 = df.tail(10)
             acc_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (last_10['Up_Day'])])
             dist_days = len(last_10[(last_10['Rel_Vol'] > 1.2) & (~last_10['Up_Day'])])
             cluster_acc = acc_days >= 3 and dist_days <= 1
             
+            # --- Hierarchy of Signals ---
             if whale_block and cluster_acc: cat = "☢️ WHALE + CLUSTER"
             elif whale_block: cat = "🐋 WHALE BLOCK"
             elif cluster_acc: cat = "🔥 CLUSTER ACCUMULATION"
@@ -345,9 +387,12 @@ def run_master_screener():
             
             if cat != "STANDBY":
                 results.append({
-                    "Ticker": ticker, "Price": f"${c:.2f}", "Category": cat,
+                    "Ticker": ticker, 
+                    "Price": f"${c:.2f}", 
+                    "Category": cat,
                     "Vol Spike (x)": f"{v/vol_sma_20:.1f}x" if vol_sma_20 > 0 else "0.0x",
-                    "Acc Days (10d)": f"{acc_days}", "Compression (x)": f"{rng/atr_20:.2f}x" if atr_20 > 0 else "0.00x",
+                    "Acc Days (10d)": f"{acc_days}",
+                    "Compression (x)": f"{rng/atr_20:.2f}x" if atr_20 > 0 else "0.00x",
                     "Titan Score": f"{score}/5"
                 })
         except Exception: pass
@@ -366,28 +411,31 @@ def run_rrg_engine(universe_key="Macro (Assets)"):
         benchmark = universes[universe_key]["benchmark"]
         tickers = universes[universe_key]["tickers"]
         
-        closes, volumes = pd.DataFrame(), pd.DataFrame()
+        closes = pd.DataFrame()
+        volumes = pd.DataFrame()
         for t in tickers + [benchmark]:
             try:
                 d = yf.download(t, period="6mo", progress=False)
                 if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.droplevel(1)
                 d = d.dropna()
                 if not d.empty:
-                    c_col, v_col = d['Close'], d['Volume']
+                    c_col = d['Close']
+                    v_col = d['Volume']
                     if c_col.index.tz is not None: c_col.index = c_col.index.tz_localize(None)
                     if v_col.index.tz is not None: v_col.index = v_col.index.tz_localize(None)
                     closes[t] = c_col
                     volumes[t] = v_col
             except: pass
-        closes, volumes = closes.dropna(), volumes.dropna()
+            
+        closes = closes.dropna()
+        volumes = volumes.dropna()
         if closes.empty or benchmark not in closes.columns: return {"status": "offline", "error": "Insufficient RRG Universe Data"}
         
         results = []
         for ticker in tickers:
             if ticker not in closes.columns: continue
             rs = closes[ticker] / closes[benchmark]
-            rs_ratio = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100
-            rs_mom = (rs_ratio / rs_ratio.rolling(10).mean()) * 100
+            rs_ratio, rs_mom = (rs.rolling(10).mean() / rs.rolling(40).mean()) * 100, ((rs.rolling(10).mean() / rs.rolling(40).mean()) * 100 / (rs.rolling(10).mean() / rs.rolling(40).mean() * 100).rolling(10).mean()) * 100
             vol_ratio = volumes[ticker] / volumes[ticker].rolling(20).mean()
             rs_ratio, rs_mom, vol_ratio = rs_ratio.dropna(), rs_mom.dropna(), vol_ratio.dropna()
             if not rs_ratio.empty and not rs_mom.empty:
@@ -408,6 +456,7 @@ def run_tactical_chart(ticker):
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna()
         if df.empty or len(df) < 50: return None, None
+
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
@@ -415,10 +464,12 @@ def run_tactical_chart(ticker):
         df['ATR_20'] = (df['High'] - df['Low']).rolling(window=20).mean()
         df['Vol_Ratio'] = np.where(df['Vol_SMA_20'] > 0, df['Volume'] / df['Vol_SMA_20'], 0)
         df['Range_Comp'] = np.where(df['ATR_20'] > 0, (df['High'] - df['Low']) / df['ATR_20'], 1)
+        
         dp_mask = (df['Vol_Ratio'] >= 1.5) & (df['Range_Comp'] <= 0.75)
         dp_signals = df[dp_mask]
 
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="PriceAction"), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], line=dict(color='#8b949e', width=2, dash='dot'), name='50 SMA'), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['EMA_9'], line=dict(color='#39FF14', width=1.5), name='9 EMA'), row=1, col=1)
@@ -451,39 +502,18 @@ def run_tactical_chart(ticker):
 
 
 # ==============================================================================
-# V5.41 QUANTITATIVE OPTIMIZER ENGINES
+# V5.42 QUANTITATIVE OPTIMIZER ENGINES (GLOBAL SWEEP)
 # ==============================================================================
-@st.cache_data(ttl=3600)
-def fetch_optimizer_data(ticker: str, period: str = "5y") -> pd.DataFrame:
-    df = yf.download(ticker, period=period, progress=False)
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-    df = df.dropna()
-    if df.empty: return df
-
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
-    df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
-    df['Range'] = df['High'] - df['Low']
-    df['ATR_20'] = df['Range'].rolling(window=20).mean()
-    df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
-    return df.dropna()
-
 def run_fast_backtest(df: pd.DataFrame, vol_thresh: float, atr_mult: float):
     """Vectorized and highly optimized path-dependent execution engine."""
-    # Pre-calculate signal logic (Trend + Momentum Cross + Volume Spike)
     signal = (df['Close'] > df['SMA_50']) & (df['EMA_9'] > df['EMA_21']) & (df['EMA_9'].shift(1) <= df['EMA_21'].shift(1)) & (df['Volume'] > (df['Vol_SMA_20'] * vol_thresh))
     
-    closes = df['Close'].values
-    opens = df['Open'].values
-    lows = df['Low'].values
-    sma50s = df['SMA_50'].values
-    atrs = df['ATR_20'].values
-    signals = signal.values
+    closes, opens, lows = df['Close'].values, df['Open'].values, df['Low'].values
+    sma50s, atrs, signals = df['SMA_50'].values, df['ATR_20'].values, signal.values
     
     trades = []
     in_pos = False
-    entry_px = 0.0
-    stop_px = 0.0
+    entry_px, stop_px = 0.0, 0.0
     
     for i in range(1, len(df) - 1):
         if not in_pos:
@@ -493,23 +523,19 @@ def run_fast_backtest(df: pd.DataFrame, vol_thresh: float, atr_mult: float):
                 stop_px = closes[i-1] - (atr_mult * atrs[i-1])
                 if entry_px < stop_px: stop_px = entry_px
         else:
-            # Hit Trailing Stop
             if lows[i] <= stop_px:
                 exit_px = stop_px if opens[i] >= stop_px else opens[i]
                 trades.append((exit_px - entry_px) / entry_px)
                 in_pos = False
-            # Hit Structural Stop
             elif closes[i] < sma50s[i]:
                 exit_px = opens[i+1]
                 trades.append((exit_px - entry_px) / entry_px)
                 in_pos = False
             else:
-                # Trail Stop Up
                 new_stop = closes[i] - (atr_mult * atrs[i])
                 if new_stop > stop_px: stop_px = new_stop
                 
     if in_pos: trades.append((closes[-1] - entry_px) / entry_px)
-    
     if not trades: return None
     
     trades_arr = np.array(trades)
@@ -523,12 +549,51 @@ def run_fast_backtest(df: pd.DataFrame, vol_thresh: float, atr_mult: float):
     exp = (wr * avg_w) / abs(lr * avg_l) if lr > 0 and avg_l != 0 else 0.0
     roi = (np.prod(1 + trades_arr) - 1)
     
-    return {
-        "Vol Thresh": vol_thresh, "ATR Multiplier": atr_mult,
-        "Trades": len(trades_arr), "Win Rate (%)": wr * 100, 
-        "Avg Win (%)": avg_w * 100, "Avg Loss (%)": avg_l * 100,
-        "Expectancy": exp, "Total ROI (%)": roi * 100
-    }
+    return {"Vol Thresh": vol_thresh, "ATR Multiplier": atr_mult, "Trades": len(trades_arr), "Win Rate (%)": wr * 100, "Expectancy": exp, "Total ROI (%)": roi * 100}
+
+@st.cache_data(ttl=3600)
+def run_global_optimizer(period="5y"):
+    """Downloads the entire Lieutenants universe once and sweeps parameters for maximum edge."""
+    tickers = list(dict.fromkeys(cfg.LIEUTENANTS))
+    df_raw = yf.download(tickers, period=period, progress=False)
+    
+    results = []
+    vol_ranges = [1.2, 1.5, 1.8, 2.0]
+    atr_ranges = [1.5, 2.0, 2.5, 3.0]
+    
+    for ticker in tickers:
+        try:
+            df = df_raw.xs(ticker, level=1, axis=1).dropna() if len(tickers) > 1 else df_raw.dropna()
+            if df.empty or len(df) < 100: continue
+            
+            df['SMA_50'] = df['Close'].rolling(window=50).mean()
+            df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
+            df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
+            df['Range'] = df['High'] - df['Low']
+            df['ATR_20'] = df['Range'].rolling(window=20).mean()
+            df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
+            df = df.dropna()
+            
+            best_exp, best_res = -1, None
+            for vt in vol_ranges:
+                for am in atr_ranges:
+                    res = run_fast_backtest(df, vt, am)
+                    if res and res['Expectancy'] > best_exp:
+                        best_exp = res['Expectancy']
+                        best_res = res
+            
+            if best_res and best_exp > 0.2:
+                results.append({
+                    "Ticker": ticker,
+                    "Optimal Vol Spike": f"{best_res['Vol Thresh']}x",
+                    "Optimal ATR Stop": f"{best_res['ATR Multiplier']}x",
+                    "Win Rate": f"{best_res['Win Rate (%)']:.1f}%",
+                    "Expectancy": f"{best_res['Expectancy']:.2f}",
+                    "Total ROI": f"{best_res['Total ROI (%)']:+.1f}%",
+                    "Total Trades": best_res['Trades']
+                })
+        except Exception: pass
+    return pd.DataFrame(results)
 
 # ==============================================================================
 # ROUTING LOGIC: LIVE COMMAND CENTER
@@ -600,7 +665,8 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
                 xaxis=dict(side="bottom", showgrid=False), yaxis=dict(autorange="reversed", showgrid=False)
             )
             st.plotly_chart(fig_hm, width="stretch", key="heatmap_chart")
-        else: st.error(f"Pearson Matrix Offline: {matrix_res.get('error', 'Unknown Error')}")
+        else:
+            st.error(f"Pearson Matrix Offline: {matrix_res.get('error', 'Unknown Error')}")
 
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
@@ -621,11 +687,8 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
             if not gamma_data: st.info("No options data available at this time.")
             else:
                 for g in gamma_data:
-                    zg = g['Zero Gamma']
-                    c1, c2 = g['Call Wall 1'], g['Call Wall 2']
-                    p1, p2 = g['Put Wall 1'], g['Put Wall 2']
-                    px = g['Price']
-                    pcr = g['PCR']
+                    zg, c1, c2 = g['Zero Gamma'], g['Call Wall 1'], g['Call Wall 2']
+                    p1, p2, px, pcr = g['Put Wall 1'], g['Put Wall 2'], g['Price'], g['PCR']
 
                     if px >= zg: vol_state, cc_main = "<span style='color:#39FF14;'>+GEX (CHOP/MEAN-REVERT)</span>", "card-neutral"
                     else: vol_state, cc_main = "<span style='color:#FF4444;'>-GEX (TREND/HIGH-VOL)</span>", "card-bearish"
@@ -813,62 +876,24 @@ if app_mode == "🚀 LIVE COMMAND CENTER":
 # ROUTING LOGIC: QUANT OPTIMIZER LAB
 # ==============================================================================
 elif app_mode == "🧪 QUANT OPTIMIZER LAB":
-    st.markdown("<div class='apex-header'>🔬 QUANTITATIVE OPTIMIZER (BRUTE-FORCE GRID SEARCH)</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Mathematically prove threshold robustness. Hunt for the 'Plateau of Edge' to prevent curve-fitting.</p>", unsafe_allow_html=True)
+    st.markdown("<div class='apex-header'>🔬 GLOBAL QUANTITATIVE OPTIMIZER (UNIVERSE SWEEP)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b949e; margin-bottom: 30px;'>Mathematically correlating and calculating the optimal volume threshold and trailing stop ranges for the entire configuration universe simultaneously.</p>", unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([1, 1, 2])
-    with c1: test_ticker = st.text_input("Target Ticker:", value="NVDA", max_chars=10).upper()
-    with c2: test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y"], index=2)
-    with c3:
-        st.write("")
-        st.write("")
-        run_opt = st.button("RUN GRID SEARCH", use_container_width=True)
+    c1, c2 = st.columns([1, 3])
+    with c1: test_period = st.selectbox("Historical Horizon:", ["1y", "2y", "5y", "10y"], index=2)
+    with c2: run_opt = st.button("EXECUTE GLOBAL PARAMETER SWEEP", use_container_width=True)
 
-    st.markdown("<div style='background: rgba(88, 166, 255, 0.1); padding: 15px; border-radius: 6px; border-left: 4px solid #58a6ff; margin-bottom: 20px;'><h4 style='margin:0; color:#58a6ff;'>Optimizer Parameters</h4><p style='margin:5px 0 0 0; font-size: 0.85rem; color:#c9d1d9;'>Scanning 16 permutations: Vol Spike thresholds vs ATR Stop Multipliers.</p></div>", unsafe_allow_html=True)
+    st.markdown("<div style='background: rgba(88, 166, 255, 0.1); padding: 15px; border-radius: 6px; border-left: 4px solid #58a6ff; margin-bottom: 20px;'><h4 style='margin:0; color:#58a6ff;'>Optimizer Matrix Execution</h4><p style='margin:5px 0 0 0; font-size: 0.85rem; color:#c9d1d9;'>Scanning 16 permutations per asset across the entire Lieutenants list to extract the highest mathematical Expectancy Ratio.</p></div>", unsafe_allow_html=True)
 
     if run_opt:
-        with st.spinner(f"Ingesting {test_period} data for {test_ticker}..."):
-            df = fetch_optimizer_data(test_ticker, test_period)
-            if df.empty:
-                st.error(f"Failed to fetch data for {test_ticker}.")
+        with st.spinner(f"Ingesting {test_period} dataset across all Lieutenants and mapping multi-dimensional vectors..."):
+            res_df = run_global_optimizer(test_period)
+            
+            if res_df.empty:
+                st.warning("Zero robust mathematical edges detected across the universe. Baseline logic did not trigger positive expectancy.")
             else:
-                with st.spinner("Executing multi-dimensional vector simulations..."):
-                    results = []
-                    # The Grid: Test 16 total variations
-                    vol_ranges = [1.2, 1.5, 1.8, 2.0]
-                    atr_ranges = [1.5, 2.0, 2.5, 3.0]
-                    
-                    for vt in vol_ranges:
-                        for am in atr_ranges:
-                            res = run_fast_backtest(df, vt, am)
-                            if res: results.append(res)
-                    
-                    res_df = pd.DataFrame(results)
-                    
-                    if res_df.empty:
-                        st.warning("Zero trades executed across all tested parameters. The baseline logic did not trigger.")
-                    else:
-                        # Build Heatmap Data
-                        pivot_df = res_df.pivot(index='ATR Multiplier', columns='Vol Thresh', values='Expectancy').fillna(0)
-                        
-                        st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>🗺️ EXPECTANCY PLATEAU HEATMAP</h3>", unsafe_allow_html=True)
-                        st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>Look for clusters of high expectancy. A single bright square is a curve-fit anomaly. A solid block of color represents structural edge.</p>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color: #FFF; margin-top: 20px;'>🗺️ OPTIMAL SYSTEM RANGES (SORTED BY EXPECTANCY)</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='color: #8b949e; font-size: 0.9rem;'>The machine has identified the mathematically proven Volume and ATR parameters tailored specifically to the liquidity physics of each asset.</p>", unsafe_allow_html=True)
 
-                        fig_opt = go.Figure(data=go.Heatmap(
-                            z=pivot_df.values, x=[f"{v}x Vol" for v in pivot_df.columns], y=[f"{a}x ATR" for a in pivot_df.index],
-                            colorscale=[[0.0, '#FF4444'], [0.5, '#161b22'], [1.0, '#39FF14']],
-                            text=np.round(pivot_df.values, 2), texttemplate="%{text}", showscale=True
-                        ))
-                        fig_opt.update_layout(plot_bgcolor='#0d1117', paper_bgcolor='#0d1117', font=dict(color='#c9d1d9', size=14), margin=dict(l=20, r=20, t=20, b=20), height=500)
-                        st.plotly_chart(fig_opt, width="stretch")
-
-                        st.markdown("<h3 style='color: #FFF; margin-top: 40px;'>🧾 SIMULATION LEDGER (SORTED BY EDGE)</h3>", unsafe_allow_html=True)
-                        
-                        display_df = res_df.sort_values(by="Expectancy", ascending=False).copy()
-                        display_df['Win Rate (%)'] = display_df['Win Rate (%)'].map('{:.1f}%'.format)
-                        display_df['Total ROI (%)'] = display_df['Total ROI (%)'].map('{:+.1f}%'.format)
-                        display_df['Avg Win (%)'] = display_df['Avg Win (%)'].map('{:+.2f}%'.format)
-                        display_df['Avg Loss (%)'] = display_df['Avg Loss (%)'].map('{:.2f}%'.format)
-                        display_df['Expectancy'] = display_df['Expectancy'].map('{:.2f}'.format)
-                        
-                        st.dataframe(display_df, width="stretch", hide_index=True)
+                display_df = res_df.sort_values(by="Expectancy", ascending=False).reset_index(drop=True)
+                st.dataframe(display_df, width="stretch")
